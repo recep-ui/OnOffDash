@@ -38,7 +38,7 @@ class CleanupService {
         try {
             const result = await pool.query(
                 `DELETE FROM device_status_logs 
-                 WHERE checked_at < NOW() - make_interval(days => $1)`,
+                 WHERE checked_at < DATEADD(day, -$1, GETDATE())`,
                 [this.retentionDays]
             );
             const count = result.rowCount || 0;
@@ -56,7 +56,7 @@ class CleanupService {
         try {
             const result = await pool.query(
                 `DELETE FROM heartbeats 
-                 WHERE last_seen < NOW() - make_interval(days => $1)`,
+                 WHERE last_seen < DATEADD(day, -$1, GETDATE())`,
                 [this.retentionDays]
             );
             const count = result.rowCount || 0;
@@ -74,8 +74,8 @@ class CleanupService {
         try {
             const result = await pool.query(
                 `DELETE FROM printer_jam_logs 
-                 WHERE created_at < NOW() - make_interval(days => $1)
-                   AND is_resolved = true`,
+                 WHERE created_at < DATEADD(day, -$1, GETDATE())
+                   AND is_resolved = 1`,
                 [this.retentionDays]
             );
             const count = result.rowCount || 0;

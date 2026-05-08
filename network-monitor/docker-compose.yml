@@ -2,19 +2,19 @@ version: '3.8'
 
 services:
   db:
-    image: postgres:14-alpine
+    image: mcr.microsoft.com/mssql/server:2022-latest
     container_name: network_monitor_db
     restart: always
     environment:
-      POSTGRES_DB: network_monitor
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: 1234
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "StrongPassword123!"
+      MSSQL_PID: "Express"
     ports:
-      - "5432:5432"
+      - "1433:1433"
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - mssqldata:/var/opt/mssql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d network_monitor"]
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P 'StrongPassword123!' -C -Q 'SELECT 1' || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -29,10 +29,10 @@ services:
         condition: service_healthy
     environment:
       - DB_HOST=db
-      - DB_PORT=5432
+      - DB_PORT=1433
       - DB_NAME=network_monitor
-      - DB_USER=postgres
-      - DB_PASSWORD=1234
+      - DB_USER=sa
+      - DB_PASSWORD=StrongPassword123!
       - SERVER_HOST=0.0.0.0
       - SERVER_PORT=3001
       - PING_INTERVAL_SECONDS=60
@@ -54,4 +54,4 @@ services:
       - "10.0.80.113:80:80"
 
 volumes:
-  pgdata:
+  mssqldata:

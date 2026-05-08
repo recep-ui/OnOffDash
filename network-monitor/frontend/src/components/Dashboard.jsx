@@ -216,76 +216,84 @@ export default function Dashboard() {
   };
 
   return (
-    <div className="app">
-      <Header socketConnected={connected} lastUpdate={stats?.lastScanTime} />
-      
-      <div className="tab-nav">
-        <button 
-          className={`tab-btn ${activeTab === 'devices' ? 'active' : ''}`}
-          onClick={() => setActiveTab('devices')}
-        >
-          <span className="tab-icon">🖥️</span> Ağ Cihazları
-        </button>
-        <button 
-          className={`tab-btn ${activeTab === 'printers' ? 'active' : ''}`}
-          onClick={() => setActiveTab('printers')}
-        >
-          <span className="tab-icon">🖨️</span> Yazıcılar
-          {stats?.printers?.jam > 0 && (
-            <span className="tab-badge" style={{ backgroundColor: 'var(--status-offline)' }}>
-              {stats.printers.jam}
-            </span>
-          )}
-        </button>
-      </div>
-
-      <main className="main-content">
-        <SummaryCards stats={stats} />
+    <NotificationProvider socket={socket}>
+      <div className="app">
+        <Header socketConnected={connected} lastUpdate={stats?.lastScanTime} />
         
-        {activeTab === 'devices' && (
-          <DeviceTable 
-            devices={devices}
-            search={search}
-            statusFilter={statusFilter}
-            departmentFilter={departmentFilter}
-            departments={departments}
-            onSearchChange={setSearch}
-            onStatusFilterChange={setStatusFilter}
-            onDepartmentFilterChange={setDepartmentFilter}
-            onAddClick={handleAddDevice}
-            onEdit={handleEditDevice}
-            onDelete={handleDeleteDevice}
-            onRowClick={handleViewDevice}
-          />
-        )}
+        <div className="tab-nav">
+          <button 
+            className={`tab-btn ${activeTab === 'devices' ? 'active' : ''}`}
+            onClick={() => setActiveTab('devices')}
+          >
+            <span className="tab-icon">🖥️</span> Ağ Cihazları
+          </button>
+          <button 
+            className={`tab-btn ${activeTab === 'printers' ? 'active' : ''}`}
+            onClick={() => setActiveTab('printers')}
+          >
+            <span className="tab-icon">🖨️</span> Yazıcılar
+            {stats?.printers?.jam > 0 && (
+              <span className="tab-badge" style={{ backgroundColor: 'var(--status-offline)' }}>
+                {stats.printers.jam}
+              </span>
+            )}
+          </button>
+        </div>
 
-        {activeTab === 'printers' && (
-          <PrinterTable
-            printers={printers}
-            search={search}
-            statusFilter={statusFilter}
-            onSearchChange={setSearch}
-            onStatusFilterChange={setStatusFilter}
-            onAddClick={handleAddPrinter}
-            onEdit={handleEditPrinter}
-            onDelete={handleDeletePrinter}
-          />
-        )}
-      </main>
+        <main className="main-content">
+          <SummaryCards stats={stats} />
+          
+          {activeTab === 'devices' && (
+            <DeviceTable 
+              devices={devices}
+              search={search}
+              statusFilter={statusFilter}
+              departmentFilter={departmentFilter}
+              departments={departments}
+              onSearchChange={setSearch}
+              onStatusFilterChange={setStatusFilter}
+              onDepartmentFilterChange={setDepartmentFilter}
+              onAddClick={handleAddDevice}
+              onEdit={handleEditDevice}
+              onDelete={handleDeleteDevice}
+              onRowClick={handleViewDevice}
+            />
+          )}
 
-      <DeviceModal 
-        isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
-        device={editingDevice}
-        onSave={handleSaveDevice}
-      />
+          {activeTab === 'printers' && (
+            <PrinterTable
+              printers={printers}
+              search={search}
+              statusFilter={statusFilter}
+              onSearchChange={setSearch}
+              onStatusFilterChange={setStatusFilter}
+              onAddClick={handleAddPrinter}
+              onEdit={handleEditPrinter}
+              onDelete={handleDeletePrinter}
+            />
+          )}
+        </main>
 
-      <PrinterModal
-        isOpen={isPrinterModalOpen}
-        onClose={() => setIsPrinterModalOpen(false)}
-        printer={editingPrinter}
-        onSave={handleSavePrinter}
-      />
-    </div>
+        <DeviceModal 
+          isOpen={isModalOpen}
+          onClose={() => setIsModalOpen(false)}
+          device={editingDevice}
+          onSave={handleSaveDevice}
+        />
+
+        <DeviceDetailModal
+          isOpen={!!detailDevice}
+          onClose={() => setDetailDevice(null)}
+          device={detailDevice}
+        />
+
+        <PrinterModal
+          isOpen={isPrinterModalOpen}
+          onClose={() => setIsPrinterModalOpen(false)}
+          printer={editingPrinter}
+          onSave={handleSavePrinter}
+        />
+      </div>
+    </NotificationProvider>
   );
 }

@@ -59,7 +59,7 @@ const COLUMNS = [
   { key: 'actions', label: 'İşlemler', sortable: false },
 ];
 
-export default function DeviceTable({ devices, onEdit, onDelete, search, statusFilter, departmentFilter, departments, onSearchChange, onStatusFilterChange, onDepartmentFilterChange, onAddClick }) {
+export default function DeviceTable({ devices, onEdit, onDelete, search, statusFilter, departmentFilter, departments, onSearchChange, onStatusFilterChange, onDepartmentFilterChange, onAddClick, onRowClick }) {
   const [sortBy, setSortBy] = useState('hostname');
   const [sortOrder, setSortOrder] = useState('asc');
 
@@ -184,7 +184,15 @@ export default function DeviceTable({ devices, onEdit, onDelete, search, statusF
               {sorted.map(device => (
                 <tr key={device.id} className={`status-${device.status}`}>
                   <td><StatusBadge status={device.status} /></td>
-                  <td><strong>{device.hostname}</strong></td>
+                  <td>
+                    <strong 
+                      style={{ cursor: 'pointer', color: 'var(--accent-blue)' }}
+                      onClick={() => onRowClick && onRowClick(device)}
+                      title="Detayları görüntüle"
+                    >
+                      {device.hostname}
+                    </strong>
+                  </td>
                   <td style={{ fontFamily: 'monospace' }}>{device.ip_address}</td>
                   <td>{device.department || '—'}</td>
                   <td>{device.os_name || '—'}</td>

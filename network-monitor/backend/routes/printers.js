@@ -7,19 +7,21 @@ router.get('/', async (req, res) => {
     try {
         const result = await pool.query(`
             SELECT p.*, 
-                   json_agg(json_build_object(
-                       'id', pt.id,
-                       'color', pt.color,
-                       'level', pt.level,
-                       'max_capacity', pt.max_capacity,
-                       'pages_printed', pt.pages_printed
-                   )) FILTER (WHERE pt.id IS NOT NULL) as toners
+                   (
+                       SELECT pt.id, pt.color, pt.level, pt.max_capacity, pt.pages_printed
+                       FROM printer_toners pt
+                       WHERE pt.printer_id = p.id
+                       FOR JSON PATH
+                   ) as toners
             FROM printers p
-            LEFT JOIN printer_toners pt ON pt.printer_id = p.id
-            GROUP BY p.id
             ORDER BY p.name
         `);
-        res.json(result.rows);
+        // Parse toners JSON string back to object array
+        const rows = result.rows.map(row => {
+            row.toners = row.toners ? JSON.parse(row.toners) : [];
+            return row;
+        });
+        res.json(rows);
     } catch (err) {
         console.error('Error fetching printers:', err);
         res.status(500).json({ error: 'Failed to fetch printers' });
@@ -31,24 +33,25 @@ router.get('/:id', async (req, res) => {
     try {
         const result = await pool.query(`
             SELECT p.*, 
-                   json_agg(json_build_object(
-                       'id', pt.id,
-                       'color', pt.color,
-                       'level', pt.level,
-                       'max_capacity', pt.max_capacity,
-                       'pages_printed', pt.pages_printed
-                   )) FILTER (WHERE pt.id IS NOT NULL) as toners
+                   (
+                       SELECT pt.id, pt.color, pt.level, pt.max_capacity, pt.pages_printed
+                       FROM printer_toners pt
+                       WHERE pt.printer_id = p.id
+                       FOR JSON PATH
+                   ) as toners
             FROM printers p
-            LEFT JOIN printer_toners pt ON pt.printer_id = p.id
             WHERE p.id = $1
-            GROUP BY p.id
         `, [req.params.id]);
 
         if (result.rows.length === 0) {
             return res.status(404).json({ error: 'Printer not found' });
         }
-        res.json(result.rows[0]);
+        
+        const row = result.rows[0];
+        row.toners = row.toners ? JSON.parse(row.toners) : [];
+        res.json(row);
     } catch (err) {
+        console.error('Error fetching printer:', err);
         res.status(500).json({ error: 'Failed to fetch printer' });
     }
 });
@@ -63,13 +66,18 @@ router.post('/', async (req, res) => {
         }
 
         const printerResult = await pool.query(
-            `INSERT INTO printers (name, ip_address, model)
-             VALUES ($1, $2, $3)
-             ON CONFLICT (ip_address) DO UPDATE SET
-                name = EXCLUDED.name,
-                model = COALESCE(EXCLUDED.model, printers.model),
-                updated_at = NOW()
-             RETURNING *`,
+            `MERGE INTO printers AS target
+             USING (VALUES ($1, $2, $3)) AS source (name, ip_address, model)
+             ON target.ip_address = source.ip_address
+             WHEN MATCHED THEN
+                 UPDATE SET
+                     name = source.name,
+                     model = COALESCE(source.model, target.model),
+                     updated_at = GETDATE()
+             WHEN NOT MATCHED THEN
+                 INSERT (name, ip_address, model)
+                 VALUES (source.name, source.ip_address, source.model)
+             OUTPUT INSERTED.*;`,
             [name, ip_address, model || '']
         );
 
@@ -111,11 +119,11 @@ router.put('/:id', async (req, res) => {
                 has_paper_jam = COALESCE($6, has_paper_jam),
                 printer_status = COALESCE($7, printer_status),
                 total_page_count = COALESCE($8, total_page_count),
-                last_updated = NOW(),
-                updated_at = NOW()
-             WHERE id = $9
-             RETURNING *`,
-            [name, ip_address, model, is_online, error_message, has_paper_jam, printer_status, total_page_count, req.params.id]
+                last_updated = GETDATE(),
+                updated_at = GETDATE()
+             OUTPUT INSERTED.*
+             WHERE id = $9`,
+            [name, ip_address, model, is_online === undefined ? null : (is_online ? 1 : 0), error_message, has_paper_jam === undefined ? null : (has_paper_jam ? 1 : 0), printer_status, total_page_count, req.params.id]
         );
 
         if (result.rows.length === 0) {
@@ -148,7 +156,7 @@ router.put('/:id', async (req, res) => {
 // DELETE /api/printers/:id
 router.delete('/:id', async (req, res) => {
     try {
-        const result = await pool.query('DELETE FROM printers WHERE id = $1 RETURNING id', [req.params.id]);
+        const result = await pool.query('DELETE FROM printers OUTPUT DELETED.id WHERE id = $1', [req.params.id]);
         if (result.rows.length === 0) {
             return res.status(404).json({ error: 'Printer not found' });
         }
@@ -167,8 +175,8 @@ router.get('/:id/jamlogs', async (req, res) => {
     try {
         const limit = parseInt(req.query.limit) || 50;
         const result = await pool.query(
-            `SELECT * FROM printer_jam_logs WHERE printer_id = $1 ORDER BY created_at DESC LIMIT $2`,
-            [req.params.id, limit]
+            `SELECT TOP (${limit}) * FROM printer_jam_logs WHERE printer_id = $1 ORDER BY created_at DESC`,
+            [req.params.id]
         );
         res.json(result.rows);
     } catch (err) {

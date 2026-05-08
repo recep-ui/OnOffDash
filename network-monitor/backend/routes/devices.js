@@ -10,13 +10,12 @@ router.get('/', async (req, res) => {
         let query = `
             SELECT d.*, h.cpu_usage, h.ram_usage, h.uptime_seconds 
             FROM devices d
-            LEFT JOIN LATERAL (
-                SELECT cpu_usage, ram_usage, uptime_seconds
+            OUTER APPLY (
+                SELECT TOP 1 cpu_usage, ram_usage, uptime_seconds
                 FROM heartbeats
                 WHERE device_id = d.id
                 ORDER BY last_seen DESC
-                LIMIT 1
-            ) h ON true
+            ) h
         `;
         const conditions = [];
         const params = [];
@@ -32,10 +31,10 @@ router.get('/', async (req, res) => {
         }
         if (agent !== undefined && agent !== '') {
             conditions.push(`agent_installed = $${paramIndex++}`);
-            params.push(agent === 'true');
+            params.push(agent === 'true' ? 1 : 0);
         }
         if (search) {
-            conditions.push(`(hostname ILIKE $${paramIndex} OR ip_address ILIKE $${paramIndex} OR username ILIKE $${paramIndex})`);
+            conditions.push(`(hostname LIKE $${paramIndex} OR ip_address LIKE $${paramIndex} OR username LIKE $${paramIndex})`);
             params.push(`%${search}%`);
             paramIndex++;
         }
@@ -93,17 +92,22 @@ router.post('/', async (req, res) => {
         }
 
         const result = await pool.query(
-            `INSERT INTO devices (hostname, ip_address, mac_address, department, os_name, username, notes)
-             VALUES ($1, $2, $3, $4, $5, $6, $7)
-             ON CONFLICT (ip_address) DO UPDATE SET
-                hostname = EXCLUDED.hostname,
-                mac_address = COALESCE(EXCLUDED.mac_address, devices.mac_address),
-                department = COALESCE(EXCLUDED.department, devices.department),
-                os_name = COALESCE(EXCLUDED.os_name, devices.os_name),
-                username = COALESCE(EXCLUDED.username, devices.username),
-                notes = COALESCE(EXCLUDED.notes, devices.notes),
-                updated_at = NOW()
-             RETURNING *`,
+            `MERGE INTO devices AS target
+             USING (VALUES ($1, $2, $3, $4, $5, $6, $7)) AS source (hostname, ip_address, mac_address, department, os_name, username, notes)
+             ON target.ip_address = source.ip_address
+             WHEN MATCHED THEN
+                 UPDATE SET
+                     hostname = source.hostname,
+                     mac_address = COALESCE(source.mac_address, target.mac_address),
+                     department = COALESCE(source.department, target.department),
+                     os_name = COALESCE(source.os_name, target.os_name),
+                     username = COALESCE(source.username, target.username),
+                     notes = COALESCE(source.notes, target.notes),
+                     updated_at = GETDATE()
+             WHEN NOT MATCHED THEN
+                 INSERT (hostname, ip_address, mac_address, department, os_name, username, notes)
+                 VALUES (source.hostname, source.ip_address, source.mac_address, source.department, source.os_name, source.username, source.notes)
+             OUTPUT INSERTED.*;`,
             [hostname, ip_address, mac_address || null, department || '', os_name || '', username || '', notes || '']
         );
 
@@ -116,7 +120,8 @@ router.post('/', async (req, res) => {
         res.status(201).json(device);
     } catch (err) {
         console.error('Error adding device:', err);
-        if (err.code === '23505') {
+        // MSSQL Constraint error code handling might differ (2627 for duplicate key)
+        if (err.number === 2627 || err.code === '23505') {
             return res.status(409).json({ error: 'Device with this IP already exists' });
         }
         res.status(500).json({ error: 'Failed to add device' });
@@ -137,9 +142,9 @@ router.put('/:id', async (req, res) => {
                 os_name = COALESCE($5, os_name),
                 username = COALESCE($6, username),
                 notes = COALESCE($7, notes),
-                updated_at = NOW()
-             WHERE id = $8
-             RETURNING *`,
+                updated_at = GETDATE()
+             OUTPUT INSERTED.*
+             WHERE id = $8`,
             [hostname, ip_address, mac_address, department, os_name, username, notes, req.params.id]
         );
 
@@ -161,7 +166,7 @@ router.put('/:id', async (req, res) => {
 // DELETE /api/devices/:id — Cihaz sil
 router.delete('/:id', async (req, res) => {
     try {
-        const result = await pool.query('DELETE FROM devices WHERE id = $1 RETURNING id', [req.params.id]);
+        const result = await pool.query('DELETE FROM devices OUTPUT DELETED.id WHERE id = $1', [req.params.id]);
         if (result.rows.length === 0) {
             return res.status(404).json({ error: 'Device not found' });
         }
@@ -180,8 +185,8 @@ router.get('/:id/logs', async (req, res) => {
     try {
         const limit = parseInt(req.query.limit) || 50;
         const result = await pool.query(
-            `SELECT * FROM device_status_logs WHERE device_id = $1 ORDER BY checked_at DESC LIMIT $2`,
-            [req.params.id, limit]
+            `SELECT TOP (${limit}) * FROM device_status_logs WHERE device_id = $1 ORDER BY checked_at DESC`,
+            [req.params.id]
         );
         res.json(result.rows);
     } catch (err) {
@@ -195,18 +200,17 @@ router.get('/:id/heartbeats', async (req, res) => {
         const limit = parseInt(req.query.limit) || 200;
         const hours = parseInt(req.query.hours) || 0;
 
-        let query = 'SELECT * FROM heartbeats WHERE device_id = $1';
+        let query = `SELECT TOP (${limit}) * FROM heartbeats WHERE device_id = $1`;
         const params = [req.params.id];
         let paramIdx = 2;
 
         if (hours > 0) {
-            query += ` AND last_seen > NOW() - make_interval(hours => $${paramIdx})`;
+            query += ` AND last_seen > DATEADD(hour, -$${paramIdx}, GETDATE())`;
             params.push(hours);
             paramIdx++;
         }
 
-        query += ` ORDER BY last_seen DESC LIMIT $${paramIdx}`;
-        params.push(limit);
+        query += ` ORDER BY last_seen DESC`;
 
         const result = await pool.query(query, params);
         res.json(result.rows);

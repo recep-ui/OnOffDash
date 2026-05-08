@@ -38,7 +38,7 @@ function TonerBars({ toners }) {
             <span className="toner-label">{toner.color.substring(0, 1).toUpperCase()}</span>
             <div className="toner-bar">
               <div 
-                className="toner-bar-fill" 
+                className={`toner-bar-fill ${percentage < 10 ? 'toner-critical' : ''}`}
                 style={{ width: `${percentage}%`, backgroundColor: barColor }}
               ></div>
             </div>

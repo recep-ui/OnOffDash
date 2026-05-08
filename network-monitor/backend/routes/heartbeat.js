@@ -23,18 +23,23 @@ router.post('/', async (req, res) => {
 
         // Cihazı bul veya oluştur (upsert)
         const deviceResult = await pool.query(
-            `INSERT INTO devices (hostname, ip_address, mac_address, os_name, username, agent_installed, status, last_seen, updated_at)
-             VALUES ($1, $2, $3, $4, $5, true, 'online', NOW(), NOW())
-             ON CONFLICT (ip_address) DO UPDATE SET
-                hostname = EXCLUDED.hostname,
-                mac_address = COALESCE(EXCLUDED.mac_address, devices.mac_address),
-                os_name = COALESCE(EXCLUDED.os_name, devices.os_name),
-                username = COALESCE(EXCLUDED.username, devices.username),
-                agent_installed = true,
-                status = 'online',
-                last_seen = NOW(),
-                updated_at = NOW()
-             RETURNING *`,
+            `MERGE INTO devices AS target
+             USING (VALUES ($1, $2, $3, $4, $5)) AS source (hostname, ip_address, mac_address, os_name, username)
+             ON target.ip_address = source.ip_address
+             WHEN MATCHED THEN
+                 UPDATE SET
+                     hostname = source.hostname,
+                     mac_address = COALESCE(source.mac_address, target.mac_address),
+                     os_name = COALESCE(source.os_name, target.os_name),
+                     username = COALESCE(source.username, target.username),
+                     agent_installed = 1,
+                     status = 'online',
+                     last_seen = GETDATE(),
+                     updated_at = GETDATE()
+             WHEN NOT MATCHED THEN
+                 INSERT (hostname, ip_address, mac_address, os_name, username, agent_installed, status, last_seen, updated_at)
+                 VALUES (source.hostname, source.ip_address, source.mac_address, source.os_name, source.username, 1, 'online', GETDATE(), GETDATE())
+             OUTPUT INSERTED.*;`,
             [hostname, ip_address, mac_address || null, os_name || '', username || '']
         );
 
@@ -50,7 +55,7 @@ router.post('/', async (req, res) => {
         // Durum log kaydı
         await pool.query(
             `INSERT INTO device_status_logs (device_id, status, checked_at)
-             VALUES ($1, 'online', NOW())`,
+             VALUES ($1, 'online', GETDATE())`,
             [device.id]
         );
 

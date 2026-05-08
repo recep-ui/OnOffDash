@@ -4,7 +4,6 @@ const { pool } = require('../db/connection');
 
 // POST /api/software — Agent'tan yazılım listesi al (bulk upsert)
 router.post('/', async (req, res) => {
-    const client = await pool.connect();
     try {
         const { device_ip, software } = req.body;
 
@@ -13,7 +12,7 @@ router.post('/', async (req, res) => {
         }
 
         // Cihazı bul
-        const deviceResult = await client.query(
+        const deviceResult = await pool.query(
             'SELECT id FROM devices WHERE ip_address = $1',
             [device_ip]
         );
@@ -24,21 +23,20 @@ router.post('/', async (req, res) => {
 
         const deviceId = deviceResult.rows[0].id;
 
-        await client.query('BEGIN');
+        // Mevcut yazılım kayıtlarını sil ve yenilerini ekle tek seferde (Transaction)
+        let queryScript = `
+            BEGIN TRY
+                BEGIN TRAN;
+                DELETE FROM device_software WHERE device_id = $1;
+        `;
+        const params = [deviceId];
+        let paramIdx = 2;
 
-        // Mevcut yazılım kayıtlarını sil ve yenilerini ekle
-        await client.query('DELETE FROM device_software WHERE device_id = $1', [deviceId]);
-
-        // Bulk insert
         if (software.length > 0) {
             const values = [];
-            const params = [];
-            let paramIdx = 1;
-
             for (const sw of software) {
-                values.push(`($${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++})`);
+                values.push(`($1, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++})`);
                 params.push(
-                    deviceId,
                     (sw.name || '').substring(0, 500),
                     (sw.version || '').substring(0, 100),
                     (sw.publisher || '').substring(0, 255),
@@ -46,15 +44,22 @@ router.post('/', async (req, res) => {
                     sw.source || 'registry'
                 );
             }
-
-            await client.query(
-                `INSERT INTO device_software (device_id, name, version, publisher, install_date, source)
-                 VALUES ${values.join(', ')}`,
-                params
-            );
+            queryScript += `
+                INSERT INTO device_software (device_id, name, version, publisher, install_date, source)
+                VALUES ${values.join(', ')};
+            `;
         }
 
-        await client.query('COMMIT');
+        queryScript += `
+                COMMIT TRAN;
+            END TRY
+            BEGIN CATCH
+                IF @@TRANCOUNT > 0 ROLLBACK TRAN;
+                THROW;
+            END CATCH
+        `;
+
+        await pool.query(queryScript, params);
 
         // Socket.IO ile bildir
         const io = req.app.get('io');
@@ -64,11 +69,8 @@ router.post('/', async (req, res) => {
 
         res.json({ message: 'Software inventory updated', device_id: deviceId, count: software.length });
     } catch (err) {
-        await client.query('ROLLBACK').catch(() => {});
         console.error('Error updating software inventory:', err);
         res.status(500).json({ error: 'Failed to update software inventory' });
-    } finally {
-        client.release();
     }
 });
 
@@ -82,7 +84,7 @@ router.get('/:deviceId', async (req, res) => {
         let paramIdx = 2;
 
         if (search) {
-            query += ` AND (name ILIKE $${paramIdx} OR publisher ILIKE $${paramIdx})`;
+            query += ` AND (name LIKE $${paramIdx} OR publisher LIKE $${paramIdx})`;
             params.push(`%${search}%`);
             paramIdx++;
         }

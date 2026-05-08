@@ -102,10 +102,10 @@ class PrinterMonitorService {
                     has_paper_jam = $4,
                     total_page_count = $5,
                     error_message = $6,
-                    last_updated = NOW()
-                 WHERE id = $7
-                 RETURNING *`,
-                [isOnline, model, statusText, hasJam, pageCount, errorMessage, printer.id]
+                    last_updated = GETDATE()
+                 OUTPUT INSERTED.*
+                 WHERE id = $7`,
+                [isOnline ? 1 : 0, model, statusText, hasJam ? 1 : 0, pageCount, errorMessage, printer.id]
             );
 
             // Update Toners
@@ -125,22 +125,19 @@ class PrinterMonitorService {
             // Fetch fully populated printer to emit via Socket.io
             const fullPrinterRes = await pool.query(`
                 SELECT p.*,
-                       json_agg(
-                           json_build_object(
-                               'color', t.color,
-                               'level', t.level,
-                               'max_capacity', t.max_capacity,
-                               'pages_printed', t.pages_printed
-                           )
+                       (
+                           SELECT t.color, t.level, t.max_capacity, t.pages_printed
+                           FROM printer_toners t
+                           WHERE t.printer_id = p.id
+                           FOR JSON PATH
                        ) as toners
                 FROM printers p
-                LEFT JOIN printer_toners t ON p.id = t.printer_id
                 WHERE p.id = $1
-                GROUP BY p.id
             `, [printer.id]);
 
             if (fullPrinterRes.rows.length > 0) {
                 const fullPrinter = fullPrinterRes.rows[0];
+                fullPrinter.toners = fullPrinter.toners ? JSON.parse(fullPrinter.toners) : [];
                 this.io.emit('printer:updated', fullPrinter);
 
                 // Toner düşük seviye kontrolü (<%10)
@@ -403,8 +400,8 @@ class PrinterMonitorService {
             const printersResult = await pool.query(`
                 SELECT 
                     COUNT(*) as total,
-                    SUM(CASE WHEN is_online = true THEN 1 ELSE 0 END) as online,
-                    SUM(CASE WHEN has_paper_jam = true THEN 1 ELSE 0 END) as jam
+                    SUM(CASE WHEN is_online = 1 THEN 1 ELSE 0 END) as online,
+                    SUM(CASE WHEN has_paper_jam = 1 THEN 1 ELSE 0 END) as jam
                 FROM printers
             `);
             

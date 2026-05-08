@@ -9,21 +9,21 @@ router.get('/stats', async (req, res) => {
         const onlineResult = await pool.query(`SELECT COUNT(*) as count FROM devices WHERE status = 'online'`);
         const offlineResult = await pool.query(`SELECT COUNT(*) as count FROM devices WHERE status = 'offline'`);
         const warningResult = await pool.query(`SELECT COUNT(*) as count FROM devices WHERE status = 'warning'`);
-        const agentResult = await pool.query(`SELECT COUNT(*) as count FROM devices WHERE agent_installed = true`);
+        const agentResult = await pool.query(`SELECT COUNT(*) as count FROM devices WHERE agent_installed = 1`);
 
         // Yazıcı istatistikleri
         const printerTotalResult = await pool.query('SELECT COUNT(*) as count FROM printers');
-        const printerOnlineResult = await pool.query(`SELECT COUNT(*) as count FROM printers WHERE is_online = true`);
-        const printerJamResult = await pool.query(`SELECT COUNT(*) as count FROM printers WHERE has_paper_jam = true`);
+        const printerOnlineResult = await pool.query(`SELECT COUNT(*) as count FROM printers WHERE is_online = 1`);
+        const printerJamResult = await pool.query(`SELECT COUNT(*) as count FROM printers WHERE has_paper_jam = 1`);
 
         // Düşük toner kontrolü — herhangi bir toneri %10 altında olan yazıcı sayısı
         const lowTonerResult = await pool.query(`
             SELECT COUNT(DISTINCT p.id) as count
             FROM printers p
             INNER JOIN printer_toners pt ON pt.printer_id = p.id
-            WHERE p.is_online = true
+            WHERE p.is_online = 1
               AND pt.max_capacity > 0
-              AND (pt.level::float / pt.max_capacity::float) * 100 < 10
+              AND (CAST(pt.level AS FLOAT) / CAST(pt.max_capacity AS FLOAT)) * 100 < 10
         `);
 
         res.json({

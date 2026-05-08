@@ -83,9 +83,9 @@ class PingService {
                     status = $1,
                     ping_ms = $2,
                     last_seen = COALESCE($3, last_seen),
-                    updated_at = NOW()
-                 WHERE id = $4
-                 RETURNING *`,
+                    updated_at = GETDATE()
+                 OUTPUT INSERTED.*
+                 WHERE id = $4`,
                 [newStatus, pingMs, lastSeenValue, device.id]
             );
 
@@ -121,11 +121,11 @@ class PingService {
             const result = await pool.query(
                 `UPDATE devices SET
                     status = 'offline',
-                    updated_at = NOW()
-                 WHERE agent_installed = true
+                    updated_at = GETDATE()
+                 OUTPUT INSERTED.*
+                 WHERE agent_installed = 1
                    AND status = 'online'
-                   AND last_seen < NOW() - make_interval(secs => $1)
-                 RETURNING *`,
+                   AND last_seen < DATEADD(second, -$1, GETDATE())`,
                 [timeoutSeconds]
             );
 
@@ -156,8 +156,8 @@ class PingService {
             const printersResult = await pool.query(`
                 SELECT 
                     COUNT(*) as total,
-                    SUM(CASE WHEN is_online = true THEN 1 ELSE 0 END) as online,
-                    SUM(CASE WHEN has_paper_jam = true THEN 1 ELSE 0 END) as jam
+                    SUM(CASE WHEN is_online = 1 THEN 1 ELSE 0 END) as online,
+                    SUM(CASE WHEN has_paper_jam = 1 THEN 1 ELSE 0 END) as jam
                 FROM printers
             `);
             const pStats = printersResult.rows[0];
