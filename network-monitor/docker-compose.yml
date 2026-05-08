@@ -1,0 +1,57 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:14-alpine
+    container_name: network_monitor_db
+    restart: always
+    environment:
+      POSTGRES_DB: network_monitor
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 1234
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d network_monitor"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build: 
+      context: ./backend
+    container_name: network_monitor_backend
+    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_NAME=network_monitor
+      - DB_USER=postgres
+      - DB_PASSWORD=1234
+      - SERVER_HOST=0.0.0.0
+      - SERVER_PORT=3001
+      - PING_INTERVAL_SECONDS=60
+      - HEARTBEAT_TIMEOUT_SECONDS=90
+      - RETENTION_DAYS=30
+    # No need to expose port 3001 externally since Nginx handles it
+    # ports:
+    #   - "3001:3001"
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: network_monitor_frontend
+    restart: always
+    depends_on:
+      - backend
+    ports:
+      # Sunucunun 10.0.80.113 IP'si üzerinden 80 portuyla yayın yapması için:
+      - "10.0.80.113:80:80"
+
+volumes:
+  pgdata:
