@@ -40,9 +40,61 @@ async function getConnection() {
 const pool = {
     connect: async () => {
         const poolInst = await getConnection();
+        const transaction = new sql.Transaction(poolInst);
+        let inTransaction = false;
+
         return {
-            query: async (text, params) => pool.query(text, params),
-            release: () => {}
+            query: async (text, params) => {
+                const upperText = text.trim().toUpperCase();
+                if (upperText === 'BEGIN' || upperText === 'BEGIN TRANSACTION') {
+                    await transaction.begin();
+                    inTransaction = true;
+                    return { rows: [], rowCount: 0 };
+                }
+                if (upperText === 'COMMIT' || upperText === 'COMMIT TRANSACTION') {
+                    if (inTransaction) {
+                        await transaction.commit();
+                        inTransaction = false;
+                    }
+                    return { rows: [], rowCount: 0 };
+                }
+                if (upperText === 'ROLLBACK' || upperText === 'ROLLBACK TRANSACTION') {
+                    if (inTransaction) {
+                        await transaction.rollback();
+                        inTransaction = false;
+                    }
+                    return { rows: [], rowCount: 0 };
+                }
+
+                const request = inTransaction ? new sql.Request(transaction) : poolInst.request();
+                
+                let mssqlText = text;
+                if (params && params.length > 0) {
+                    params.forEach((param, index) => {
+                        const paramName = `p${index + 1}`;
+                        request.input(paramName, param);
+                    });
+                    mssqlText = mssqlText.replace(/\$(\d+)/g, '@p$1');
+                }
+                
+                try {
+                    const result = await request.query(mssqlText);
+                    return {
+                        rows: result.recordset || [],
+                        rowCount: result.rowsAffected ? result.rowsAffected[0] : 0
+                    };
+                } catch (error) {
+                    console.error('SQL Error on query:', mssqlText);
+                    console.error('With params:', params);
+                    throw error;
+                }
+            },
+            release: () => {
+                if (inTransaction) {
+                    transaction.rollback().catch(err => {});
+                    inTransaction = false;
+                }
+            }
         };
     },
     query: async (text, params) => {

@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { pool } = require('../db/connection');
+const xlsx = require('xlsx');
 
 // GET /api/devices — Tüm cihazları listele
 router.get('/', async (req, res) => {
@@ -69,6 +70,264 @@ router.get('/departments', async (req, res) => {
     }
 });
 
+// POST /api/devices/import - Excel verilerini içe aktar (çakışan kayıtlar için DB verisini ez, excel verisine dokunma)
+router.post('/import', async (req, res) => {
+    try {
+        const { fileData } = req.body;
+        if (!fileData) {
+            return res.status(400).json({ error: 'fileData (Base64) gereklidir.' });
+        }
+
+        // Base64'ten raw buffer'a dönüştür
+        const buffer = Buffer.from(fileData, 'base64');
+        const workbook = xlsx.read(buffer, { type: 'buffer' });
+        const firstSheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[firstSheetName];
+        const rawRows = xlsx.utils.sheet_to_json(worksheet);
+
+        console.log(`📥 API Excel Import: ${rawRows.length} satır bulundu.`);
+
+        // 1. Veritabanındaki tüm cihazları önbelleğe al
+        const devRes = await pool.query("SELECT id, hostname, ip_address FROM devices");
+        const devicesCache = devRes.rows;
+
+        let virtualIpCounter = 3000; // Yeni sanal cihazlar için IP sayacı
+        let updatedCount = 0;
+        let insertedCount = 0;
+
+        // Yardımcı Fonksiyonlar
+        function cleanHostname(hostname) {
+            if (!hostname) return '';
+            return String(hostname).trim().toLowerCase()
+                .replace(/ı/g, 'i')
+                .replace(/ş/g, 's')
+                .replace(/ğ/g, 'g')
+                .replace(/ü/g, 'u')
+                .replace(/ö/g, 'o')
+                .replace(/ç/g, 'c')
+                .replace(/i̇/g, 'i')
+                .split('.')[0]
+                .trim();
+        }
+
+        function getNormalizedRow(row) {
+            const norm = {};
+            for (const key of Object.keys(row)) {
+                const cleanKey = key.toLowerCase()
+                    .replace(/i̇/g, 'i')
+                    .replace(/ı/g, 'i')
+                    .replace(/ş/g, 's')
+                    .replace(/ğ/g, 'g')
+                    .replace(/ü/g, 'u')
+                    .replace(/ö/g, 'o')
+                    .replace(/ç/g, 'c')
+                    .replace(/\s+/g, ' ')
+                    .trim();
+                norm[cleanKey] = row[key];
+            }
+            return norm;
+        }
+
+        function findValue(row, keywords) {
+            const keys = Object.keys(row);
+            for (const kw of keywords) {
+                const foundKey = keys.find(k => k === kw || k.includes(kw));
+                if (foundKey) return row[foundKey];
+            }
+            return undefined;
+        }
+
+        function parseNumber(val) {
+            if (val === undefined || val === null || val === '') return 0;
+            if (typeof val === 'number') return Math.round(val);
+            const cleaned = String(val).replace(/[^0-9.-]/g, '');
+            const parsed = parseInt(cleaned, 10);
+            return isNaN(parsed) ? 0 : parsed;
+        }
+
+        function cleanString(val) {
+            if (val === undefined || val === null) return '';
+            return String(val).trim();
+        }
+
+        for (let i = 0; i < rawRows.length; i++) {
+            const rawRow = rawRows[i];
+            const row = getNormalizedRow(rawRow);
+
+            const hostname = cleanString(findValue(row, ['bilgisayar adi', 'bilgisayar', 'comp']));
+            let ipAddress = cleanString(findValue(row, ['bagdastirici ipv4 adresi', 'ip', 'ipv4']));
+            const department = cleanString(findValue(row, ['bolumler', 'bolum', 'dep']));
+            const osName = cleanString(findValue(row, ['isletim sistemi adi', 'isletim', 'os']));
+            const pcType = cleanString(findValue(row, ['pc/tip', 'tip', 'type']));
+            const devManufacturer = cleanString(findValue(row, ['aygit ureticisi', 'uretici', 'manuf']));
+            const devModel = cleanString(findValue(row, ['aygit modeli', 'model']));
+            const serialNumber = cleanString(findValue(row, ['seri numarasi', 'seri no', 'serial']));
+            const cpuDesc = cleanString(findValue(row, ['cpu aciklamasi', 'cpu']));
+            const cpuCores = parseNumber(findValue(row, ['cekirdek', 'cores']));
+            const ramMb = parseNumber(findValue(row, ['ram']));
+            const storageMb = parseNumber(findValue(row, ['depolama', 'disk', 'storage']));
+            const monitorModel = cleanString(findValue(row, ['monitor']));
+            const monitorSerial = cleanString(findValue(row, ['monitor seri']));
+            const keyboardModel = cleanString(findValue(row, ['klavye']));
+            const keyboardSerial = cleanString(findValue(row, ['klavye/seri']));
+            const mouseModel = cleanString(findValue(row, ['mouse']));
+            const mouseSerial = cleanString(findValue(row, ['mouse seri']));
+            const phoneModel = cleanString(findValue(row, ['telsiz telefon', 'telefon']));
+            const phoneSerial = cleanString(findValue(row, ['telsiz telefon seri', 'telefon seri']));
+            const username = cleanString(findValue(row, ['kullanici', 'user']));
+            const notes = cleanString(findValue(row, ['notlar', 'not', 'notes']));
+
+            if (!hostname) continue; // Hostname eksikse atla
+
+            if (!ipAddress || ipAddress.toLowerCase() === 'yok' || !ipAddress.includes('.')) {
+                ipAddress = `sanal-${virtualIpCounter++}`;
+            }
+
+            const cleanHost = cleanHostname(hostname);
+
+            // IP veya Hostname prefixine göre eşleşen cihaz ara
+            let match = devicesCache.find(d => 
+                (cleanHostname(d.hostname) === cleanHost) ||
+                (d.ip_address && d.ip_address === ipAddress)
+            );
+
+            if (match) {
+                // UPDATE: Çakışan cihazın alanlarını Excel'deki değerlerle ez
+                // Hostname ve IP adresi çakışmalarını önlemek için d.hostname ve d.ip_address'i ellemeyiz
+                const query = `
+                    UPDATE devices SET
+                        department = COALESCE(NULLIF($1, ''), department),
+                        os_name = COALESCE(NULLIF($2, ''), os_name),
+                        pc_type = COALESCE(NULLIF($3, ''), pc_type),
+                        device_manufacturer = COALESCE(NULLIF($4, ''), device_manufacturer),
+                        device_model = COALESCE(NULLIF($5, ''), device_model),
+                        serial_number = COALESCE(NULLIF($6, ''), serial_number),
+                        cpu_description = COALESCE(NULLIF($7, ''), cpu_description),
+                        cpu_cores = CASE WHEN $8 > 0 THEN $8 ELSE cpu_cores END,
+                        ram_mb = CASE WHEN $9 > 0 THEN $9 ELSE ram_mb END,
+                        storage_mb = CASE WHEN $10 > 0 THEN $10 ELSE storage_mb END,
+                        monitor_model = COALESCE(NULLIF($11, ''), monitor_model),
+                        monitor_serial = COALESCE(NULLIF($12, ''), monitor_serial),
+                        keyboard_model = COALESCE(NULLIF($13, ''), keyboard_model),
+                        keyboard_serial = COALESCE(NULLIF($14, ''), keyboard_serial),
+                        mouse_model = COALESCE(NULLIF($15, ''), mouse_model),
+                        mouse_serial = COALESCE(NULLIF($16, ''), mouse_serial),
+                        phone_model = COALESCE(NULLIF($17, ''), phone_model),
+                        phone_serial = COALESCE(NULLIF($18, ''), phone_serial),
+                        username = COALESCE(NULLIF($19, ''), username),
+                        notes = COALESCE(NULLIF($20, ''), notes),
+                        updated_at = GETDATE()
+                    WHERE id = $21
+                `;
+                const params = [
+                    department, osName, pcType,
+                    devManufacturer, devModel, serialNumber, cpuDesc, cpuCores,
+                    ramMb, storageMb, monitorModel, monitorSerial, keyboardModel,
+                    keyboardSerial, mouseModel, mouseSerial, phoneModel, phoneSerial,
+                    username, notes, match.id
+                ];
+                await pool.query(query, params);
+                updatedCount++;
+            } else {
+                // INSERT: Çakışmayan yeni cihazı ekle
+                const query = `
+                    INSERT INTO devices (
+                        hostname, ip_address, department, os_name, pc_type,
+                        device_manufacturer, device_model, serial_number, cpu_description, cpu_cores,
+                        ram_mb, storage_mb, monitor_model, monitor_serial, keyboard_model,
+                        keyboard_serial, mouse_model, mouse_serial, phone_model, phone_serial,
+                        username, notes, status
+                    ) VALUES (
+                        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, 'offline'
+                    )
+                `;
+                const params = [
+                    hostname, ipAddress, department, osName, pcType,
+                    devManufacturer, devModel, serialNumber, cpuDesc, cpuCores,
+                    ramMb, storageMb, monitorModel, monitorSerial, keyboardModel,
+                    keyboardSerial, mouseModel, mouseSerial, phoneModel, phoneSerial,
+                    username, notes
+                ];
+                await pool.query(query, params);
+                insertedCount++;
+
+                devicesCache.push({ hostname, ip_address: ipAddress });
+            }
+        }
+
+        // Web socket istemcilerini uyar
+        const io = req.app.get('io');
+        if (io) io.emit('device:updated');
+
+        res.json({ success: true, updatedCount, insertedCount });
+    } catch (err) {
+        console.error('❌ Excel Import error:', err);
+        res.status(500).json({ error: 'Excel içe aktarma başarısız oldu: ' + err.message });
+    }
+});
+
+// GET /api/devices/export - Tüm cihaz verilerini Excel formatında indir
+router.get('/export', async (req, res) => {
+    try {
+        const query = `
+            SELECT d.*, h.cpu_usage, h.ram_usage, h.uptime_seconds 
+            FROM devices d
+            OUTER APPLY (
+                SELECT TOP 1 cpu_usage, ram_usage, uptime_seconds
+                FROM heartbeats
+                WHERE device_id = d.id
+                ORDER BY last_seen DESC
+            ) h
+            ORDER BY d.hostname ASC
+        `;
+        const result = await pool.query(query);
+        const devices = result.rows;
+
+        // Orijinal kolon isimleriyle eşle
+        const excelRows = devices.map(d => ({
+            'Bilgisayar adı': d.hostname || '',
+            'Bağdaştırıcı IPv4 adresi': d.ip_address || '',
+            'Bölümler': d.department || '',
+            'İşletim sistemi adı': d.os_name || '',
+            'PC/Tip': d.pc_type || '',
+            'Aygıt üreticisi': d.device_manufacturer || '',
+            'Aygıt modeli': d.device_model || '',
+            'Seri numarası': d.serial_number || '',
+            'CPU açıklaması': d.cpu_description || '',
+            'Çekirdek Say.': d.cpu_cores || 0,
+            'RAM  [MB]': d.ram_mb || 0,
+            'Depolama [MB]': d.storage_mb || 0,
+            'Monitör': d.monitor_model || '',
+            'Monitör Seri no': d.monitor_serial || '',
+            'Klavye': d.keyboard_model || '',
+            'Klavye/Seri no': d.keyboard_serial || '',
+            'Mouse': d.mouse_model || '',
+            'Mouse Seri No': d.mouse_serial || '',
+            'Telsiz Telefon': d.phone_model || '',
+            'Telsiz Telefon Seri no': d.phone_serial || '',
+            'Kullanıcı': d.username || '',
+            'Notlar': d.notes || '',
+            'Durum': d.status === 'online' ? 'Çevrimiçi' : d.status === 'warning' ? 'Uyarı' : 'Çevrimdışı',
+            'Ping (ms)': d.ping_ms || '',
+            'Ajan Yüklü': d.agent_installed ? 'Evet' : 'Hayır'
+        }));
+
+        const ws = xlsx.utils.json_to_sheet(excelRows);
+        const wb = xlsx.utils.book_new();
+        xlsx.utils.book_append_sheet(wb, ws, "Cihaz Envanteri");
+
+        // Excel dosyasını buffer'a yaz
+        const buf = xlsx.write(wb, { type: 'buffer', bookType: 'xlsx' });
+
+        res.setHeader('Content-Disposition', 'attachment; filename="Cihaz_Envanter_Export.xlsx"');
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.send(buf);
+    } catch (err) {
+        console.error('❌ Excel Export error:', err);
+        res.status(500).json({ error: 'Excel dışa aktarma başarısız oldu: ' + err.message });
+    }
+});
+
 // GET /api/devices/:id — Tek cihaz detayı
 router.get('/:id', async (req, res) => {
     try {
@@ -131,7 +390,17 @@ router.post('/', async (req, res) => {
 // PUT /api/devices/:id — Cihaz güncelle
 router.put('/:id', async (req, res) => {
     try {
-        const { hostname, ip_address, mac_address, department, os_name, username, notes } = req.body;
+        const {
+            hostname, ip_address, mac_address, department, os_name, username, notes,
+            pc_type, device_manufacturer, device_model, serial_number,
+            cpu_description, cpu_cores, ram_mb, storage_mb,
+            monitor_model, monitor_serial, keyboard_model, keyboard_serial,
+            mouse_model, mouse_serial, phone_model, phone_serial
+        } = req.body;
+
+        const parsedCpuCores = cpu_cores !== undefined && cpu_cores !== '' ? parseInt(cpu_cores, 10) : null;
+        const parsedRamMb = ram_mb !== undefined && ram_mb !== '' ? parseInt(ram_mb, 10) : null;
+        const parsedStorageMb = storage_mb !== undefined && storage_mb !== '' ? parseInt(storage_mb, 10) : null;
 
         const result = await pool.query(
             `UPDATE devices SET
@@ -142,10 +411,33 @@ router.put('/:id', async (req, res) => {
                 os_name = COALESCE($5, os_name),
                 username = COALESCE($6, username),
                 notes = COALESCE($7, notes),
+                pc_type = COALESCE($8, pc_type),
+                device_manufacturer = COALESCE($9, device_manufacturer),
+                device_model = COALESCE($10, device_model),
+                serial_number = COALESCE($11, serial_number),
+                cpu_description = COALESCE($12, cpu_description),
+                cpu_cores = COALESCE($13, cpu_cores),
+                ram_mb = COALESCE($14, ram_mb),
+                storage_mb = COALESCE($15, storage_mb),
+                monitor_model = COALESCE($16, monitor_model),
+                monitor_serial = COALESCE($17, monitor_serial),
+                keyboard_model = COALESCE($18, keyboard_model),
+                keyboard_serial = COALESCE($19, keyboard_serial),
+                mouse_model = COALESCE($20, mouse_model),
+                mouse_serial = COALESCE($21, mouse_serial),
+                phone_model = COALESCE($22, phone_model),
+                phone_serial = COALESCE($23, phone_serial),
                 updated_at = GETDATE()
              OUTPUT INSERTED.*
-             WHERE id = $8`,
-            [hostname, ip_address, mac_address, department, os_name, username, notes, req.params.id]
+             WHERE id = $24`,
+            [
+                hostname, ip_address, mac_address, department, os_name, username, notes,
+                pc_type, device_manufacturer, device_model, serial_number,
+                cpu_description, parsedCpuCores, parsedRamMb, parsedStorageMb,
+                monitor_model, monitor_serial, keyboard_model, keyboard_serial,
+                mouse_model, mouse_serial, phone_model, phone_serial,
+                req.params.id
+            ]
         );
 
         if (result.rows.length === 0) {

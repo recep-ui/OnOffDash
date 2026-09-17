@@ -7,14 +7,14 @@ services:
     restart: always
     environment:
       ACCEPT_EULA: "Y"
-      MSSQL_SA_PASSWORD: "StrongPassword123!"
+      MSSQL_SA_PASSWORD: "${MSSQL_SA_PASSWORD}"
       MSSQL_PID: "Express"
     ports:
       - "1433:1433"
     volumes:
       - mssqldata:/var/opt/mssql
     healthcheck:
-      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P 'StrongPassword123!' -C -Q 'SELECT 1' || exit 1"]
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P '$$MSSQL_SA_PASSWORD' -C -Q 'SELECT 1' || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -24,23 +24,82 @@ services:
       context: ./backend
     container_name: network_monitor_backend
     restart: always
+    cap_add:
+      - NET_RAW
     depends_on:
       db:
         condition: service_healthy
+    ports:
+      - "3001:3001"
     environment:
       - DB_HOST=db
       - DB_PORT=1433
-      - DB_NAME=network_monitor
-      - DB_USER=sa
-      - DB_PASSWORD=StrongPassword123!
+      - DB_NAME=${DB_NAME}
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${MSSQL_SA_PASSWORD}
       - SERVER_HOST=0.0.0.0
       - SERVER_PORT=3001
-      - PING_INTERVAL_SECONDS=60
-      - HEARTBEAT_TIMEOUT_SECONDS=90
-      - RETENTION_DAYS=30
-    # No need to expose port 3001 externally since Nginx handles it
-    # ports:
-    #   - "3001:3001"
+      - PING_INTERVAL_SECONDS=${PING_INTERVAL_SECONDS}
+      - HEARTBEAT_TIMEOUT_SECONDS=${HEARTBEAT_TIMEOUT_SECONDS}
+      - RETENTION_DAYS=${RETENTION_DAYS}
+      - JWT_SECRET=${JWT_SECRET}
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3001/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  pdf-service:
+    build:
+      context: ./services/pdf-service
+    container_name: network_monitor_pdf
+    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8001:8001"
+    environment:
+      - CORS_ORIGINS=${CORS_ORIGINS}
+      - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB}
+      - DB_HOST=db
+      - DB_PORT=1433
+      - DB_NAME=${DB_NAME}
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${MSSQL_SA_PASSWORD}
+      - JWT_SECRET=${JWT_SECRET}
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/api/pdf/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  file-service:
+    build:
+      context: ./services/file-service
+    container_name: network_monitor_file
+    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8002:8002"
+    environment:
+      - CORS_ORIGINS=${CORS_ORIGINS}
+      - FILE_TOOLS_MAX_FILE_SIZE_MB=${FILE_TOOLS_MAX_FILE_SIZE_MB}
+      - FILE_TOOLS_TTL_MINUTES=${FILE_TOOLS_TTL_MINUTES}
+      - FILE_TOOLS_LOG_MODE=${FILE_TOOLS_LOG_MODE}
+      - DB_HOST=db
+      - DB_PORT=1433
+      - DB_NAME=${DB_NAME}
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${MSSQL_SA_PASSWORD}
+      - JWT_SECRET=${JWT_SECRET}
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8002/api/file-tools/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
 
   frontend:
     build:
@@ -48,10 +107,14 @@ services:
     container_name: network_monitor_frontend
     restart: always
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
+      pdf-service:
+        condition: service_healthy
+      file-service:
+        condition: service_healthy
     ports:
-      # Sunucunun 10.0.80.113 IP'si üzerinden 80 portuyla yayın yapması için:
-      - "10.0.80.113:80:80"
+      - "${HOST_PORT}:80"
 
 volumes:
   mssqldata:

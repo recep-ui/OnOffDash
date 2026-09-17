@@ -1,6 +1,15 @@
-export default function SummaryCards({ stats }) {
+export default function SummaryCards({ stats, printers = [] }) {
   const deviceStats = stats?.devices || {};
   const printerStats = stats?.printers || {};
+
+  const lowTonerPrinters = printers.filter(p => {
+    if (!p.is_online || !p.toners || p.toners.length === 0) return false;
+    return p.toners.some(t => {
+      if (!t) return false;
+      const percentage = (t.level / (t.max_capacity || 100)) * 100;
+      return percentage < 10;
+    });
+  });
 
   const cards = [
     { key: 'total', label: 'Toplam Cihaz', value: deviceStats.total || 0, icon: '🖥️', type: 'total' },
@@ -35,6 +44,20 @@ export default function SummaryCards({ stats }) {
               </span>
             )}
           </div>
+          {card.key === 'lowToner' && lowTonerPrinters.length > 0 && (
+            <div className="low-toner-names" style={{
+              marginTop: '12px',
+              fontSize: '12px',
+              color: 'var(--text-secondary)',
+              borderTop: '1px solid var(--border-color)',
+              paddingTop: '8px',
+              lineHeight: '1.4',
+              whiteSpace: 'normal',
+              wordBreak: 'break-word'
+            }}>
+              <strong>Yazıcılar:</strong> {lowTonerPrinters.map(p => `${p.name} (${p.ip_address})`).join(', ')}
+            </div>
+          )}
         </div>
       ))}
     </div>

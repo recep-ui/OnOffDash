@@ -1,8 +1,8 @@
 require('dotenv').config();
 
 // SERVER_URL yapılandırması:
-//   Docker ortamı (Nginx reverse proxy): http://10.0.80.113      (port 80, varsayılan)
-//   Docker dışı (doğrudan backend):      http://10.0.80.113:3001 (port 3001)
+//   Docker ortamı (Nginx reverse proxy): http://10.0.80.110     (port 80, varsayılan)
+//   Docker dışı (doğrudan backend):      http://10.0.80.110:3001 (port 3001)
 //
 // .env dosyasında SERVER_URL tanımlayarak özelleştirebilirsiniz.
 // Örnek: SERVER_URL=http://10.0.80.113:3001
@@ -11,7 +11,7 @@ function buildServerUrl() {
     if (process.env.SERVER_URL) {
         return process.env.SERVER_URL;
     }
-    const host = process.env.SERVER_HOST || '10.0.80.113';
+    const host = process.env.SERVER_HOST || '10.0.80.110';
     const port = process.env.SERVER_PORT || '80';
     return `http://${host}:${port}`;
 }

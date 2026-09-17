@@ -17,7 +17,7 @@ OnOffDash, ağınızdaki bilgisayarları, sunucuları ve yazıcıları tek bir m
 Bu projeyi çalıştırmak için bilgisayarınızda (veya sunucunuzda) aşağıdaki araçların kurulu olması gerekir:
 
 1. **Node.js** (v16.x veya daha yeni bir sürüm) - [İndir](https://nodejs.org/)
-2. **PostgreSQL** (v12 veya üstü) - [İndir](https://www.postgresql.org/download/)
+2. **Microsoft SQL Server** (2019/2022 veya LocalDB / Express sürümü) - Port: 1433
 
 ---
 
@@ -60,13 +60,13 @@ PostgreSQL veritabanını yönetecek ve tüm sistemi çalıştıracak olan backe
    ```bash
    npm install
    ```
-3. Backend klasörünün içerisine `.env` adında bir dosya oluşturup PostgreSQL veritabanı şifrenizi ve sunucu IP'nizi tanımlayın (Örnek `backend/.env` içeriği):
+3. Backend klasörünün içerisine `.env` adında bir dosya oluşturup SQL Server veritabanı şifrenizi ve sunucu IP'nizi tanımlayın (Örnek `backend/.env` içeriği):
    ```env
    DB_HOST=localhost
-   DB_PORT=5432
+   DB_PORT=1433
    DB_NAME=network_monitor
-   DB_USER=postgres
-   DB_PASSWORD=1234  # Kendi veritabanı şifreniz
+   DB_USER=sa
+   DB_PASSWORD=KendiSifreniz  # Kendi SQL Server şifreniz
 
    SERVER_HOST=10.0.80.113  # Veya localhost (0.0.0.0)
    SERVER_PORT=3001
@@ -131,4 +131,4 @@ Eğer sadece ping değil, aynı zamanda cihazın donanım bilgilerini (RAM, CPU)
 
 - **EADDRINUSE (Port Hatası):** Backend'i başlattığınızda "address already in use 3001" veya Frontend için "port 5173" hataları alıyorsanız, o portu kullanan önceki işlemler kapanmamış demektir. Görev yöneticisinden `Node.js` süreçlerini sonlandırın ve tekrar deneyin.
 - **Yazıcılar Otomatik Güncellenmiyor:** Backend SNMP (Port 161 UDP) kullanarak yazıcı verilerini çeker. Yazıcılarda SNMP erişiminin aktif (`public` komünitesi ile) olduğundan emin olun. Cihazınız SNMP desteklemiyorsa sistem Web Scraper yöntemine geçerek sayfayı kazımayı (özellikle HP'ler için) dener.
-- **Veritabanı Hataları (SCRAM-SERVER-FIRST-MESSAGE):** `.env` dosyasındaki `DB_PASSWORD` ile yerel makinenizdeki PostgreSQL şifrenizin (örneğin pgAdmin ile girdiğiniz şifrenin) birebir eşleştiğinden emin olun.
+- **Veritabanı Hataları (ConnectionError):** `.env` dosyasındaki `DB_PASSWORD` ile yerel SQL Server Express/sa şifrenizin birebir eşleştiğinden emin olun. SQL Server TCP/IP bağlantılarının ve 1433 portunun Sql Server Configuration Manager üzerinden etkinleştirildiğinden emin olun.

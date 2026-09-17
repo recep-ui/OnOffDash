@@ -3,6 +3,7 @@ FROM node:20-alpine
 WORKDIR /usr/src/app
 
 COPY package*.json ./
+RUN apk add --no-cache iputils
 RUN npm install --production
 
 COPY . .

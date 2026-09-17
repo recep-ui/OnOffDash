@@ -1,4 +1,7 @@
 import { useState, useEffect } from 'react';
+import { Monitor } from 'lucide-react';
+import Modal from './ui/Modal';
+import Button from './ui/Button';
 
 export default function DeviceModal({ isOpen, onClose, device, onSave }) {
   const isEditing = !!device;
@@ -70,140 +73,142 @@ export default function DeviceModal({ isOpen, onClose, device, onSave }) {
   };
 
   return (
-    <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="modal">
-        <div className="modal-header">
-          <h2 className="modal-title">{isEditing ? 'Cihazı Düzenle' : 'Yeni Cihaz Ekle'}</h2>
-          <button className="modal-close" onClick={onClose}>&times;</button>
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      title={isEditing ? 'Cihazı Düzenle' : 'Yeni Cihaz Ekle'}
+      subtitle={isEditing ? `${device.hostname} (${device.ip_address})` : 'Ağa yeni izlenebilir cihaz tanımlayın.'}
+      icon={Monitor}
+      maxWidth="620px"
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose} disabled={saving}>
+            İptal
+          </Button>
+          <Button variant="primary" onClick={handleSubmit} disabled={saving}>
+            {saving ? 'Kaydediliyor...' : 'Kaydet'}
+          </Button>
+        </>
+      }
+    >
+      <form onSubmit={handleSubmit}>
+        {error && (
+          <div style={{
+            padding: '10px 14px',
+            backgroundColor: 'var(--status-offline-bg)',
+            color: 'var(--status-offline)',
+            border: '1px solid var(--status-offline-border)',
+            borderRadius: 'var(--radius-md)',
+            marginBottom: '16px',
+            fontSize: '13px'
+          }}>
+            {error}
+          </div>
+        )}
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+          <div className="form-group">
+            <label className="form-label required" htmlFor="hostname">Bilgisayar Adı (Hostname)</label>
+            <input
+              type="text"
+              id="hostname"
+              name="hostname"
+              className="form-input"
+              value={formData.hostname}
+              onChange={handleChange}
+              placeholder="PC-MUHASEBE-01"
+              required
+            />
+          </div>
+
+          <div className="form-group">
+            <label className="form-label required" htmlFor="ip_address">IP Adresi</label>
+            <input
+              type="text"
+              id="ip_address"
+              name="ip_address"
+              className="form-input"
+              value={formData.ip_address}
+              onChange={handleChange}
+              placeholder="192.168.1.100"
+              required
+              disabled={isEditing && device.agent_installed}
+            />
+            {isEditing && device.agent_installed && (
+              <span className="form-hint">Agent kurulu cihazlarda IP sabittir.</span>
+            )}
+          </div>
         </div>
 
-        <form onSubmit={handleSubmit}>
-          <div className="modal-body">
-            {error && (
-              <div style={{ padding: '10px 14px', background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', borderLeft: '3px solid #ef4444', borderRadius: '4px', marginBottom: '16px', fontSize: '14px' }}>
-                {error}
-              </div>
-            )}
-
-            <div className="form-row">
-              <div className="form-group">
-                <label className="form-label" htmlFor="hostname">Bilgisayar Adı (Hostname) *</label>
-                <input
-                  type="text"
-                  id="hostname"
-                  name="hostname"
-                  className="form-input"
-                  value={formData.hostname}
-                  onChange={handleChange}
-                  placeholder="PC-MUHASEBE-01"
-                  required
-                />
-              </div>
-
-              <div className="form-group">
-                <label className="form-label" htmlFor="ip_address">IP Adresi *</label>
-                <input
-                  type="text"
-                  id="ip_address"
-                  name="ip_address"
-                  className="form-input"
-                  value={formData.ip_address}
-                  onChange={handleChange}
-                  placeholder="192.168.1.100"
-                  required
-                  disabled={isEditing && device.agent_installed}
-                />
-                {isEditing && device.agent_installed && (
-                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                    Agent kurulu cihazlarda IP değiştirilemez.
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div className="form-row">
-              <div className="form-group">
-                <label className="form-label" htmlFor="mac_address">MAC Adresi</label>
-                <input
-                  type="text"
-                  id="mac_address"
-                  name="mac_address"
-                  className="form-input"
-                  value={formData.mac_address}
-                  onChange={handleChange}
-                  placeholder="AA:BB:CC:DD:EE:FF"
-                />
-              </div>
-
-              <div className="form-group">
-                <label className="form-label" htmlFor="department">Departman</label>
-                <input
-                  type="text"
-                  id="department"
-                  name="department"
-                  className="form-input"
-                  value={formData.department}
-                  onChange={handleChange}
-                  placeholder="Muhasebe, İK, Üretim..."
-                  list="department-list"
-                />
-              </div>
-            </div>
-
-            <div className="form-row">
-              <div className="form-group">
-                <label className="form-label" htmlFor="os_name">İşletim Sistemi</label>
-                <input
-                  type="text"
-                  id="os_name"
-                  name="os_name"
-                  className="form-input"
-                  value={formData.os_name}
-                  onChange={handleChange}
-                  placeholder="Windows 10 Pro"
-                />
-              </div>
-
-              <div className="form-group">
-                <label className="form-label" htmlFor="username">Kullanıcı Adı</label>
-                <input
-                  type="text"
-                  id="username"
-                  name="username"
-                  className="form-input"
-                  value={formData.username}
-                  onChange={handleChange}
-                  placeholder="ahmet.yilmaz"
-                />
-              </div>
-            </div>
-
-            <div className="form-group" style={{ marginBottom: 0 }}>
-              <label className="form-label" htmlFor="notes">Notlar</label>
-              <textarea
-                id="notes"
-                name="notes"
-                className="form-input"
-                value={formData.notes}
-                onChange={handleChange}
-                placeholder="Cihaz hakkında ek bilgiler..."
-                rows="3"
-                style={{ resize: 'vertical' }}
-              />
-            </div>
-
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+          <div className="form-group">
+            <label className="form-label" htmlFor="mac_address">MAC Adresi</label>
+            <input
+              type="text"
+              id="mac_address"
+              name="mac_address"
+              className="form-input"
+              value={formData.mac_address}
+              onChange={handleChange}
+              placeholder="AA:BB:CC:DD:EE:FF"
+            />
           </div>
 
-          <div className="modal-footer">
-            <button type="button" className="btn btn-ghost" onClick={onClose} disabled={saving}>
-              İptal
-            </button>
-            <button type="submit" className="btn btn-primary" disabled={saving}>
-              {saving ? 'Kaydediliyor...' : 'Kaydet'}
-            </button>
+          <div className="form-group">
+            <label className="form-label" htmlFor="department">Departman</label>
+            <input
+              type="text"
+              id="department"
+              name="department"
+              className="form-input"
+              value={formData.department}
+              onChange={handleChange}
+              placeholder="Muhasebe, İK, Üretim..."
+            />
           </div>
-        </form>
-      </div>
-    </div>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+          <div className="form-group">
+            <label className="form-label" htmlFor="os_name">İşletim Sistemi</label>
+            <input
+              type="text"
+              id="os_name"
+              name="os_name"
+              className="form-input"
+              value={formData.os_name}
+              onChange={handleChange}
+              placeholder="Windows 11 Pro"
+            />
+          </div>
+
+          <div className="form-group">
+            <label className="form-label" htmlFor="username">Kullanıcı Adı</label>
+            <input
+              type="text"
+              id="username"
+              name="username"
+              className="form-input"
+              value={formData.username}
+              onChange={handleChange}
+              placeholder="ahmet.yilmaz"
+            />
+          </div>
+        </div>
+
+        <div className="form-group" style={{ marginBottom: 0 }}>
+          <label className="form-label" htmlFor="notes">Notlar & Açıklama</label>
+          <textarea
+            id="notes"
+            name="notes"
+            className="form-textarea"
+            value={formData.notes}
+            onChange={handleChange}
+            placeholder="Cihaz veya kullanıcı hakkında özel notlar..."
+            rows="3"
+          />
+        </div>
+      </form>
+    </Modal>
   );
 }

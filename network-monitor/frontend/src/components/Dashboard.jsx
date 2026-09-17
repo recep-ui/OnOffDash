@@ -1,39 +1,87 @@
 import { useState, useEffect, useCallback } from 'react';
-import Header from './Header';
-import SummaryCards from './SummaryCards';
+import AppShell from './layout/AppShell';
+import DashboardOverview from './dashboard/DashboardOverview';
 import DeviceTable from './DeviceTable';
 import DeviceModal from './DeviceModal';
 import DeviceDetailModal from './DeviceDetailModal';
 import PrinterTable from './PrinterTable';
 import PrinterModal from './PrinterModal';
-import NotificationProvider from './NotificationProvider';
+import NotificationProvider, { useNotification } from './NotificationProvider';
+import TonerStockPanel from './TonerStockPanel';
+import ActionsPanel from './ActionsPanel';
+import MaterialsPanel from './MaterialsPanel';
+import MaintenanceGridPanel from './MaintenanceGridPanel';
 import { useSocket } from '../hooks/useSocket';
 import * as api from '../services/api';
+import Login from './Login';
+import AnalyticsPanel from './AnalyticsPanel';
+import PhoneDirectoryPanel from './PhoneDirectoryPanel';
+import IpamPanel from './IpamPanel';
+import PdfToolsDashboard from '../pages/pdf-tools/PdfToolsDashboard';
+import FileToolsDashboard from '../pages/file-tools/FileToolsDashboard';
+import ConfirmDialog from './ui/ConfirmDialog';
 
 export default function Dashboard() {
-  const [activeTab, setActiveTab] = useState('devices');
+  const { connected, on, off, socket } = useSocket();
+  return (
+    <NotificationProvider socket={socket}>
+      <DashboardContent connected={connected} on={on} off={off} socket={socket} />
+    </NotificationProvider>
+  );
+}
+
+function DashboardContent({ connected, on, off, socket }) {
+  const { showToast } = useNotification();
+  const [activeTab, setActiveTab] = useState('dashboard');
   const [stats, setStats] = useState(null);
   const [devices, setDevices] = useState([]);
   const [printers, setPrinters] = useState([]);
   const [departments, setDepartments] = useState([]);
   const [loading, setLoading] = useState(true);
-  
-  // Filters
+
+  // Authentication State
+  const [token, setToken] = useState(localStorage.getItem('token') || null);
+  const [user, setUser] = useState(() => {
+    const saved = localStorage.getItem('user');
+    return saved ? JSON.parse(saved) : null;
+  });
+
+  const handleLogin = (newToken, newUser) => {
+    localStorage.setItem('token', newToken);
+    localStorage.setItem('user', JSON.stringify(newUser));
+    setToken(newToken);
+    setUser(newUser);
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    setToken(null);
+    setUser(null);
+  };
+
+  // Filters for Device Table
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [departmentFilter, setDepartmentFilter] = useState('');
 
-  // Modal
+  // Modals
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingDevice, setEditingDevice] = useState(null);
 
   const [isPrinterModalOpen, setIsPrinterModalOpen] = useState(false);
   const [editingPrinter, setEditingPrinter] = useState(null);
 
+  // Custom delete confirmation modal state
+  const [deleteConfirm, setDeleteConfirm] = useState({
+    isOpen: false,
+    title: '',
+    message: '',
+    onConfirm: null
+  });
+
   // Device Detail Modal
   const [detailDevice, setDetailDevice] = useState(null);
-
-  const { connected, on, off, socket } = useSocket();
 
   const loadData = useCallback(async () => {
     try {
@@ -56,8 +104,10 @@ export default function Dashboard() {
   }, []);
 
   useEffect(() => {
-    loadData();
-  }, [loadData]);
+    if (token) {
+      loadData();
+    }
+  }, [loadData, token]);
 
   // Socket event listeners
   useEffect(() => {
@@ -159,16 +209,21 @@ export default function Dashboard() {
     setIsModalOpen(true);
   };
 
-  const handleDeleteDevice = async (device) => {
-    if (window.confirm(`${device.hostname} (${device.ip_address}) cihazını silmek istediğinize emin misiniz?`)) {
-      try {
-        await api.deleteDevice(device.id);
-        // Optimistic update
-        setDevices(prev => prev.filter(d => d.id !== device.id));
-      } catch (err) {
-        alert('Cihaz silinirken hata oluştu: ' + err.message);
+  const handleDeleteDevice = (device) => {
+    setDeleteConfirm({
+      isOpen: true,
+      title: 'Cihazı Sil',
+      message: `${device.hostname} (${device.ip_address}) cihazını silmek istediğinize emin misiniz? Bu işlem cihazın tüm geçmişini kalıcı olarak silecektir.`,
+      onConfirm: async () => {
+        try {
+          await api.deleteDevice(device.id);
+          setDevices(prev => prev.filter(d => d.id !== device.id));
+          showToast('success', '🗑️ Cihaz Silindi', 'Cihaz ve tüm bağlı veriler başarıyla silindi.');
+        } catch (err) {
+          showToast('error', '❌ Hata', 'Cihaz silinirken hata oluştu: ' + err.message);
+        }
       }
-    }
+    });
   };
 
   const handleSaveDevice = async (formData) => {
@@ -177,7 +232,6 @@ export default function Dashboard() {
     } else {
       await api.createDevice(formData);
     }
-    // Verileri yenile
     loadData();
   };
 
@@ -191,15 +245,21 @@ export default function Dashboard() {
     setIsPrinterModalOpen(true);
   };
 
-  const handleDeletePrinter = async (printer) => {
-    if (window.confirm(`${printer.name} (${printer.ip_address}) yazıcısını silmek istediğinize emin misiniz?`)) {
-      try {
-        await api.deletePrinter(printer.id);
-        setPrinters(prev => prev.filter(p => p.id !== printer.id));
-      } catch (err) {
-        alert('Yazıcı silinirken hata oluştu: ' + err.message);
+  const handleDeletePrinter = (printer) => {
+    setDeleteConfirm({
+      isOpen: true,
+      title: 'Yazıcıyı Sil',
+      message: `${printer.name} (${printer.ip_address}) yazıcısını silmek istediğinize emin misiniz? Bu işlem yazıcıyı sistemden kalıcı olarak kaldıracaktır.`,
+      onConfirm: async () => {
+        try {
+          await api.deletePrinter(printer.id);
+          setPrinters(prev => prev.filter(p => p.id !== printer.id));
+          showToast('success', '🗑️ Yazıcı Silindi', 'Yazıcı başarıyla silindi.');
+        } catch (err) {
+          showToast('error', '❌ Hata', 'Yazıcı silinirken hata oluştu: ' + err.message);
+        }
       }
-    }
+    });
   };
 
   const handleSavePrinter = async (formData) => {
@@ -215,85 +275,186 @@ export default function Dashboard() {
     setDetailDevice(device);
   };
 
+  const handleImportExcel = async (file) => {
+    try {
+      showToast('info', '📥 Excel Yükleniyor', 'Excel dosyası işleniyor, lütfen bekleyin...');
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        try {
+          const dataUrl = e.target.result;
+          const base64Data = dataUrl.split(',')[1];
+          const result = await api.importExcel(base64Data);
+          showToast('success', '✅ İçe Aktarma Başarılı', `Cihazlar başarıyla içe aktarıldı: ${result.updatedCount} güncellendi, ${result.insertedCount} yeni cihaz eklendi.`);
+          loadData();
+        } catch (err) {
+          console.error(err);
+          showToast('error', '❌ Hata', 'Excel içe aktarılırken bir hata oluştu: ' + err.message);
+        }
+      };
+      reader.onerror = () => {
+        showToast('error', '❌ Hata', 'Dosya okunurken bir hata oluştu.');
+      };
+      reader.readAsDataURL(file);
+    } catch (err) {
+      showToast('error', '❌ Hata', err.message);
+    }
+  };
+
+  const handleExportExcel = () => {
+    try {
+      showToast('info', '📤 Excel Hazırlanıyor', 'Excel dosyası indiriliyor...');
+      window.location.href = `/api/devices/export?token=${token}`;
+    } catch (err) {
+      showToast('error', '❌ Hata', 'Excel dışa aktarılırken hata oluştu: ' + err.message);
+    }
+  };
+
+  if (!token) {
+    return <Login onLogin={handleLogin} />;
+  }
+
   return (
-    <NotificationProvider socket={socket}>
-      <div className="app">
-        <Header socketConnected={connected} lastUpdate={stats?.lastScanTime} />
-        
-        <div className="tab-nav">
-          <button 
-            className={`tab-btn ${activeTab === 'devices' ? 'active' : ''}`}
-            onClick={() => setActiveTab('devices')}
-          >
-            <span className="tab-icon">🖥️</span> Ağ Cihazları
-          </button>
-          <button 
-            className={`tab-btn ${activeTab === 'printers' ? 'active' : ''}`}
-            onClick={() => setActiveTab('printers')}
-          >
-            <span className="tab-icon">🖨️</span> Yazıcılar
-            {stats?.printers?.jam > 0 && (
-              <span className="tab-badge" style={{ backgroundColor: 'var(--status-offline)' }}>
-                {stats.printers.jam}
-              </span>
-            )}
-          </button>
-        </div>
-
-        <main className="main-content">
-          <SummaryCards stats={stats} />
-          
-          {activeTab === 'devices' && (
-            <DeviceTable 
-              devices={devices}
-              search={search}
-              statusFilter={statusFilter}
-              departmentFilter={departmentFilter}
-              departments={departments}
-              onSearchChange={setSearch}
-              onStatusFilterChange={setStatusFilter}
-              onDepartmentFilterChange={setDepartmentFilter}
-              onAddClick={handleAddDevice}
-              onEdit={handleEditDevice}
-              onDelete={handleDeleteDevice}
-              onRowClick={handleViewDevice}
-            />
-          )}
-
-          {activeTab === 'printers' && (
-            <PrinterTable
-              printers={printers}
-              search={search}
-              statusFilter={statusFilter}
-              onSearchChange={setSearch}
-              onStatusFilterChange={setStatusFilter}
-              onAddClick={handleAddPrinter}
-              onEdit={handleEditPrinter}
-              onDelete={handleDeletePrinter}
-            />
-          )}
-        </main>
-
-        <DeviceModal 
-          isOpen={isModalOpen}
-          onClose={() => setIsModalOpen(false)}
-          device={editingDevice}
-          onSave={handleSaveDevice}
+    <AppShell
+      activeTab={activeTab}
+      onSelectTab={setActiveTab}
+      socketConnected={connected}
+      lastUpdate={stats?.lastScanTime}
+      user={user}
+      onLogout={handleLogout}
+      stats={stats}
+      devices={devices}
+      printers={printers}
+      onSelectDevice={handleViewDevice}
+      onSelectPrinter={(printer) => {
+        setActiveTab('printers');
+      }}
+    >
+      {/* 1. Main Dashboard (Exact Reference Design View) */}
+      {activeTab === 'dashboard' && (
+        <DashboardOverview
+          user={user}
+          stats={stats}
+          devices={devices}
+          printers={printers}
+          onSelectTab={setActiveTab}
+          onViewDevice={handleViewDevice}
+          onViewPrinter={() => setActiveTab('printers')}
         />
+      )}
 
-        <DeviceDetailModal
-          isOpen={!!detailDevice}
-          onClose={() => setDetailDevice(null)}
-          device={detailDevice}
+      {/* 2. Devices Tab */}
+      {activeTab === 'devices' && (
+        <DeviceTable
+          devices={devices}
+          search={search}
+          statusFilter={statusFilter}
+          departmentFilter={departmentFilter}
+          departments={departments}
+          onSearchChange={setSearch}
+          onStatusFilterChange={setStatusFilter}
+          onDepartmentFilterChange={setDepartmentFilter}
+          onAddClick={user?.role !== 'viewer' ? handleAddDevice : null}
+          onEdit={user?.role !== 'viewer' ? handleEditDevice : null}
+          onDelete={user?.role === 'admin' ? handleDeleteDevice : null}
+          onRowClick={handleViewDevice}
+          onImportExcel={user?.role !== 'viewer' ? handleImportExcel : null}
+          onExportExcel={handleExportExcel}
+          role={user?.role}
         />
+      )}
 
-        <PrinterModal
-          isOpen={isPrinterModalOpen}
-          onClose={() => setIsPrinterModalOpen(false)}
-          printer={editingPrinter}
-          onSave={handleSavePrinter}
-        />
-      </div>
-    </NotificationProvider>
+      {/* 3. Printers & Toner Stock Tab */}
+      {activeTab === 'printers' && (
+        <>
+          <PrinterTable
+            printers={printers}
+            search={search}
+            statusFilter={statusFilter}
+            onSearchChange={setSearch}
+            onStatusFilterChange={setStatusFilter}
+            onAddClick={user?.role !== 'viewer' ? handleAddPrinter : null}
+            onEdit={user?.role !== 'viewer' ? handleEditPrinter : null}
+            onDelete={user?.role === 'admin' ? handleDeletePrinter : null}
+            onRefresh={loadData}
+            role={user?.role}
+          />
+          <TonerStockPanel role={user?.role} />
+        </>
+      )}
+
+      {/* 4. Maintenance Tab */}
+      {activeTab === 'maintenance' && (
+        <MaintenanceGridPanel role={user?.role} />
+      )}
+
+      {/* 5. Actions / Tasks Tab */}
+      {(activeTab === 'actions' || activeTab === 'actions-group') && (
+        <ActionsPanel role={user?.role} onSwitchTab={setActiveTab} />
+      )}
+
+      {/* 6. Materials / Stock Tab */}
+      {activeTab === 'materials' && (
+        <MaterialsPanel role={user?.role} onSwitchTab={setActiveTab} />
+      )}
+
+      {/* 7. Phone Directory Tab */}
+      {activeTab === 'phone-directory' && (
+        <PhoneDirectoryPanel role={user?.role} />
+      )}
+
+      {/* 8. Analytics & Monitoring Tab */}
+      {(activeTab === 'analytics' || activeTab === 'monitoring') && (
+        <AnalyticsPanel />
+      )}
+
+      {/* 9. IPAM & Network Tab */}
+      {(activeTab === 'ipam' || activeTab === 'network') && (
+        <IpamPanel />
+      )}
+
+      {/* 10. PDF Tools Tab */}
+      {activeTab === 'pdf-tools' && (
+        <PdfToolsDashboard />
+      )}
+
+      {/* 11. File Tools Tab */}
+      {(activeTab === 'file-tools' || activeTab === 'tools') && (
+        <FileToolsDashboard />
+      )}
+
+      {/* Modals */}
+      <DeviceModal
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        device={editingDevice}
+        onSave={handleSaveDevice}
+      />
+
+      <DeviceDetailModal
+        isOpen={!!detailDevice}
+        onClose={() => setDetailDevice(null)}
+        device={detailDevice}
+        onUpdate={setDetailDevice}
+        role={user?.role}
+      />
+
+      <PrinterModal
+        isOpen={isPrinterModalOpen}
+        onClose={() => setIsPrinterModalOpen(false)}
+        printer={editingPrinter}
+        onSave={handleSavePrinter}
+      />
+
+      <ConfirmDialog
+        isOpen={deleteConfirm.isOpen}
+        onClose={() => setDeleteConfirm(prev => ({ ...prev, isOpen: false }))}
+        onConfirm={() => {
+          if (deleteConfirm.onConfirm) deleteConfirm.onConfirm();
+          setDeleteConfirm(prev => ({ ...prev, isOpen: false }));
+        }}
+        title={deleteConfirm.title}
+        message={deleteConfirm.message}
+      />
+    </AppShell>
   );
 }

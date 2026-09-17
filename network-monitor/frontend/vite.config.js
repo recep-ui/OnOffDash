@@ -7,6 +7,14 @@ export default defineConfig({
     host: '0.0.0.0',
     port: 5173,
     proxy: {
+      '/api/pdf': {
+        target: 'http://localhost:8001',
+        changeOrigin: true,
+      },
+      '/api/file-tools': {
+        target: 'http://localhost:8002',
+        changeOrigin: true,
+      },
       '/api': {
         target: 'http://localhost:3001',
         changeOrigin: true,

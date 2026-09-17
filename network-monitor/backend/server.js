@@ -12,12 +12,19 @@ const PingService = require('./services/pingService');
 const PrinterMonitorService = require('./services/printerMonitorService');
 const CleanupService = require('./services/cleanupService');
 
+const { authenticateToken } = require('./middleware/auth');
+const authRouter = require('./routes/auth');
+const analyticsRouter = require('./routes/analytics');
 const devicesRouter = require('./routes/devices');
 const heartbeatRouter = require('./routes/heartbeat');
 const dashboardRouter = require('./routes/dashboard');
 const printersRouter = require('./routes/printers');
 const softwareRouter = require('./routes/software');
 const agentUpdateRouter = require('./routes/agentUpdate');
+const maintenanceRouter = require('./routes/maintenance');
+const actionsRouter = require('./routes/actions');
+const phoneDirectoryRouter = require('./routes/phoneDirectory');
+const ipamRouter = require('./routes/ipam');
 
 const app = express();
 const server = http.createServer(app);
@@ -37,12 +44,18 @@ app.use(express.json({ limit: '5mb' })); // Yazılım envanteri büyük olabilir
 app.set('io', io);
 
 // Routes
-app.use('/api/devices', devicesRouter);
-app.use('/api/heartbeat', heartbeatRouter);
-app.use('/api/dashboard', dashboardRouter);
-app.use('/api/printers', printersRouter);
-app.use('/api/software', softwareRouter);
-app.use('/api/agent', agentUpdateRouter);
+app.use('/api/auth', authRouter);
+app.use('/api/analytics', authenticateToken, analyticsRouter);
+app.use('/api/devices', authenticateToken, devicesRouter);
+app.use('/api/heartbeat', heartbeatRouter); // client heartbeats
+app.use('/api/dashboard', authenticateToken, dashboardRouter);
+app.use('/api/printers', authenticateToken, printersRouter);
+app.use('/api/software', authenticateToken, softwareRouter);
+app.use('/api/agent', agentUpdateRouter); // client updates
+app.use('/api/maintenance', authenticateToken, maintenanceRouter);
+app.use('/api/actions', authenticateToken, actionsRouter);
+app.use('/api/phone-directory', authenticateToken, phoneDirectoryRouter);
+app.use('/api/ipam', authenticateToken, ipamRouter);
 
 // Health check
 app.get('/api/health', (req, res) => {

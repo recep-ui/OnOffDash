@@ -1,9 +1,15 @@
-import { useEffect, useRef, useCallback, useState } from 'react';
+import { useEffect, useRef, useCallback, useState, createContext, useContext } from 'react';
 
 // Bildirim sesleri (base64 encoded short beep)
 const ALERT_SOUND_URL = 'data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbsGczHU6c2/HNdTYaP4PM9+GHRig8drjl8ZpVMi5aoNXwrHI8HkKOs+3feUYpNXOn3u6dYzklTZjQ8LF2RB5FjbTj44ZMKDN0q9/tn2EzJUqRx+yyeUshRoi03NyFSSg2';
 
 let notificationIdCounter = 0;
+
+const NotificationContext = createContext(null);
+
+export function useNotification() {
+    return useContext(NotificationContext);
+}
 
 export default function NotificationProvider({ socket, children }) {
     const audioRef = useRef(null);
@@ -119,7 +125,7 @@ export default function NotificationProvider({ socket, children }) {
     };
 
     return (
-        <>
+        <NotificationContext.Provider value={{ showToast }}>
             {children}
 
             {/* Toast Bildirimleri */}
@@ -137,6 +143,6 @@ export default function NotificationProvider({ socket, children }) {
                     ))}
                 </div>
             )}
-        </>
+        </NotificationContext.Provider>
     );
 }

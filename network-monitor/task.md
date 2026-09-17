@@ -3,23 +3,23 @@
 - `[x]` **Özellik 1: Bildirim Sistemi (Push Notification + Sesli Uyarı)**
   - `[x]` Frontend: `NotificationProvider.jsx` oluşturulması
   - `[x]` Frontend: `Dashboard.jsx` içinde socket event'lerine bildirim entegrasyonu (device:offline, printer:jam, toner:low)
-- `[/]` **Özellik 2: Toner Düşük Uyarısı + Kırmızı Badge**
-  - `[/]` Backend: `printerMonitorService.js` içinde `%10` altı toner:low event fırlatılması
-  - `[ ]` Backend: `routes/dashboard.js` stat'larına `lowToner` sayısı eklenmesi
-  - `[ ]` Frontend: `SummaryCards.jsx` içerisine "Düşük Toner" kartı eklenmesi
-  - `[ ]` Frontend: `PrinterTable.jsx` düşük toner bar'ı için CSS/pulse animasyonu
-- `[ ]` **Özellik 3: Cihaz Detay Modalı (CPU/RAM/Disk Grafikleri)**
-  - `[ ]` Frontend: `package.json` içerisine `recharts` eklenmesi
-  - `[ ]` Backend: `routes/devices.js` Heartbeat endpoint'ine saat filtresi eklenmesi (`?hours=X`)
-  - `[ ]` Frontend: `DeviceDetailModal.jsx` oluşturulması (CPU/RAM/Disk grafikleri)
-  - `[ ]` Frontend: `DeviceTable.jsx` ve `Dashboard.jsx` üzerinden modalın tetiklenmesi
-- `[ ]` **Özellik 4: Agent Otomatik Güncelleme**
-  - `[ ]` Backend: `routes/agentUpdate.js` ve `agent_version.json` oluşturulması
-  - `[ ]` Backend: `server.js` route tanımlaması
-  - `[ ]` Agent: `updater.js` oluşturulması (.bat dosyası ile güncelleme mantığı)
-  - `[ ]` Agent: `agent.js` içerisine update kontrolünün eklenmesi
-- `[ ]` **Özellik 5: Yazılım Envanteri**
-  - `[ ]` Agent: `softwareInfo.js` oluşturulması (PowerShell `Get-WmiObject` ve `Get-AppxPackage` ile kapsamlı arama)
-  - `[ ]` Backend: `routes/software.js` yazılması ve `server.js`'e eklenmesi
-  - `[ ]` Agent: `agent.js` içerisine 6 saatte bir yazılım gönderme mantığı
-  - `[ ]` Frontend: `DeviceDetailModal.jsx` sekmesine "Yüklü Yazılımlar" tablosu eklenmesi
+- `[x]` **Özellik 2: Toner Düşük Uyarısı + Kırmızı Badge**
+  - `[x]` Backend: `printerMonitorService.js` içinde `%10` altı toner:low event fırlatılması
+  - `[x]` Backend: `routes/dashboard.js` stat'larına `lowToner` sayısı eklenmesi
+  - `[x]` Frontend: `SummaryCards.jsx` içerisine "Düşük Toner" kartı eklenmesi
+  - `[x]` Frontend: `PrinterTable.jsx` düşük toner bar'ı için CSS/pulse animasyonu
+- `[x]` **Özellik 3: Cihaz Detay Modalı (CPU/RAM/Disk Grafikleri)**
+  - `[x]` Frontend: `package.json` içerisine `recharts` eklenmesi
+  - `[x]` Backend: `routes/devices.js` Heartbeat endpoint'ine saat filtresi eklenmesi (`?hours=X`)
+  - `[x]` Frontend: `DeviceDetailModal.jsx` oluşturulması (CPU/RAM/Disk grafikleri)
+  - `[x]` Frontend: `DeviceTable.jsx` ve `Dashboard.jsx` üzerinden modalın tetiklenmesi
+- `[x]` **Özellik 4: Agent Otomatik Güncelleme**
+  - `[x]` Backend: `routes/agentUpdate.js` ve `agent_version.json` oluşturulması
+  - `[x]` Backend: `server.js` route tanımlaması
+  - `[x]` Agent: `updater.js` oluşturulması (.bat dosyası ile güncelleme mantığı)
+  - `[x]` Agent: `agent.js` içerisine update kontrolünün eklenmesi
+- `[x]` **Özellik 5: Yazılım Envanteri**
+  - `[x]` Agent: `softwareInfo.js` oluşturulması (PowerShell `Get-WmiObject` ve `Get-AppxPackage` ile kapsamlı arama)
+  - `[x]` Backend: `routes/software.js` yazılması ve `server.js`'e eklenmesi
+  - `[x]` Agent: `agent.js` içerisine 6 saatte bir yazılım gönderme mantığı
+  - `[x]` Frontend: `DeviceDetailModal.jsx` sekmesine "Yüklü Yazılımlar" tablosu eklenmesi

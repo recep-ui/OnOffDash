@@ -15,5 +15,8 @@
     "dotenv": "^17.4.2",
     "node-fetch": "^2.7.0",
     "systeminformation": "^5.31.5"
+  },
+  "devDependencies": {
+    "pkg": "^5.8.1"
   }
 }

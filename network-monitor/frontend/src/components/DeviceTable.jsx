@@ -1,5 +1,22 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
+import {
+  Search,
+  Plus,
+  FileSpreadsheet,
+  Download,
+  Upload,
+  Monitor,
+  CheckCircle2,
+  XCircle,
+  AlertTriangle,
+  Edit2,
+  Trash2,
+  Activity,
+  Cpu,
+  HardDrive
+} from 'lucide-react';
 import StatusBadge from './StatusBadge';
+import Button from './ui/Button';
 
 function getRelativeTime(dateStr) {
   if (!dateStr) return '—';
@@ -10,15 +27,8 @@ function getRelativeTime(dateStr) {
   if (diff < 10) return 'Az önce';
   if (diff < 60) return `${diff} sn önce`;
   if (diff < 3600) return `${Math.floor(diff / 60)} dk önce`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)} saat önce`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)} sa önce`;
   return `${Math.floor(diff / 86400)} gün önce`;
-}
-
-function getPingClass(ms) {
-  if (ms === null || ms === undefined) return '';
-  if (ms <= 50) return 'good';
-  if (ms <= 200) return 'medium';
-  return 'bad';
 }
 
 function formatUptime(seconds) {
@@ -26,14 +36,25 @@ function formatUptime(seconds) {
   const days = Math.floor(seconds / 86400);
   const hours = Math.floor((seconds % 86400) / 3600);
   const minutes = Math.floor((seconds % 3600) / 60);
-  
+
   const parts = [];
   if (days > 0) parts.push(`${days}g`);
   if (hours > 0) parts.push(`${hours}sa`);
   if (minutes > 0 && days === 0) parts.push(`${minutes}dk`);
-  
+
   if (parts.length === 0) return '< 1dk';
   return parts.join(' ');
+}
+
+function formatCpuDescription(cpuDesc) {
+  if (!cpuDesc) return '—';
+  return cpuDesc
+    .replace(/Intel\(R\)\s+Core\(TM\)\s+/gi, '')
+    .replace(/\s+CPU\s+@\s+\d+(\.\d+)?\s*GHz/gi, '')
+    .replace(/Intel\(R\)\s+/gi, '')
+    .replace(/\s+@\s*\d+(\.\d+)?\s*Ghz/gi, '')
+    .replace(/\s+@\s*\d+(\.\d+)?\s*GHz/gi, '')
+    .trim();
 }
 
 function getUsageColor(percent) {
@@ -43,59 +64,62 @@ function getUsageColor(percent) {
   return 'var(--status-online)';
 }
 
-const COLUMNS = [
-  { key: 'status', label: 'Durum', sortable: true },
-  { key: 'hostname', label: 'Bilgisayar Adı', sortable: true },
-  { key: 'ip_address', label: 'IP Adresi', sortable: true },
-  { key: 'department', label: 'Departman', sortable: true },
-  { key: 'os_name', label: 'İşletim Sistemi', sortable: false },
-  { key: 'username', label: 'Kullanıcı', sortable: false },
-  { key: 'cpu_usage', label: 'CPU', sortable: true },
-  { key: 'ram_usage', label: 'RAM', sortable: true },
-  { key: 'uptime_seconds', label: 'Uptime', sortable: true },
-  { key: 'ping_ms', label: 'Ping', sortable: true },
-  { key: 'last_seen', label: 'Son Görülme', sortable: true },
-  { key: 'agent_installed', label: 'Agent', sortable: false },
-  { key: 'actions', label: 'İşlemler', sortable: false },
-];
-
-export default function DeviceTable({ devices, onEdit, onDelete, search, statusFilter, departmentFilter, departments, onSearchChange, onStatusFilterChange, onDepartmentFilterChange, onAddClick, onRowClick }) {
+export default function DeviceTable({
+  devices = [],
+  onEdit,
+  onDelete,
+  search,
+  statusFilter,
+  departmentFilter,
+  departments = [],
+  onSearchChange,
+  onStatusFilterChange,
+  onDepartmentFilterChange,
+  onAddClick,
+  onRowClick,
+  onImportExcel,
+  onExportExcel,
+  role
+}) {
   const [sortBy, setSortBy] = useState('hostname');
   const [sortOrder, setSortOrder] = useState('asc');
+  const fileInputRef = useRef(null);
 
-  function handleSort(key) {
-    if (!COLUMNS.find(c => c.key === key)?.sortable) return;
-    if (sortBy === key) {
-      setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
-    } else {
-      setSortBy(key);
-      setSortOrder('asc');
+  const handleImportClick = () => {
+    if (fileInputRef.current) {
+      fileInputRef.current.click();
     }
-  }
+  };
 
-  // Client-side filtreleme
+  const handleFileChange = (e) => {
+    const file = e.target.files?.[0];
+    if (file && onImportExcel) {
+      onImportExcel(file);
+    }
+    e.target.value = '';
+  };
+
+  // Metrics summary
+  const totalCount = devices.length;
+  const onlineCount = devices.filter(d => d.status === 'online').length;
+  const offlineCount = devices.filter(d => d.status === 'offline').length;
+  const warningCount = devices.filter(d => d.status === 'warning').length;
+
+  // Filter
   const filtered = devices.filter(device => {
-    // Durum filtresi
-    if (statusFilter && statusFilter !== 'all' && device.status !== statusFilter) {
-      return false;
-    }
-    // Departman filtresi
-    if (departmentFilter && device.department !== departmentFilter) {
-      return false;
-    }
-    // Arama filtresi (hostname, IP, kullanıcı)
+    if (statusFilter && statusFilter !== 'all' && device.status !== statusFilter) return false;
+    if (departmentFilter && device.department !== departmentFilter) return false;
     if (search) {
       const s = search.toLowerCase();
       const matchHostname = (device.hostname || '').toLowerCase().includes(s);
       const matchIp = (device.ip_address || '').toLowerCase().includes(s);
       const matchUser = (device.username || '').toLowerCase().includes(s);
-      if (!matchHostname && !matchIp && !matchUser) {
-        return false;
-      }
+      if (!matchHostname && !matchIp && !matchUser) return false;
     }
     return true;
   });
 
+  // Sort
   const sorted = [...filtered].sort((a, b) => {
     let aVal = a[sortBy];
     let bVal = b[sortBy];
@@ -108,149 +132,249 @@ export default function DeviceTable({ devices, onEdit, onDelete, search, statusF
     }
 
     if (typeof aVal === 'string') {
-      return sortOrder === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+      return sortOrder === 'asc' ? aVal.localeCompare(bVal, 'tr') : bVal.localeCompare(aVal, 'tr');
     }
     return sortOrder === 'asc' ? aVal - bVal : bVal - aVal;
   });
 
   return (
-    <>
-      <div className="toolbar">
-        <div className="toolbar-left">
-          <div className="search-input">
-            <span>🔍</span>
-            <input
-              type="text"
-              placeholder="Cihaz ara (hostname, IP, kullanıcı)..."
-              value={search}
-              onChange={e => onSearchChange(e.target.value)}
-              id="device-search"
-            />
-          </div>
-          <select
-            className="filter-select"
-            value={statusFilter}
-            onChange={e => onStatusFilterChange(e.target.value)}
-            id="status-filter"
-          >
-            <option value="all">Tüm Durumlar</option>
-            <option value="online">Online</option>
-            <option value="offline">Offline</option>
-            <option value="warning">Uyarı</option>
-          </select>
-          <select
-            className="filter-select"
-            value={departmentFilter}
-            onChange={e => onDepartmentFilterChange(e.target.value)}
-            id="department-filter"
-          >
-            <option value="">Tüm Departmanlar</option>
-            {departments.map(d => (
-              <option key={d} value={d}>{d}</option>
-            ))}
-          </select>
+    <div className="devices-page">
+      {/* Top Page Header */}
+      <div className="page-header">
+        <div className="page-title-group">
+          <h1 className="page-title">Cihazlar</h1>
+          <p className="page-subtitle">Ağ üzerindeki bilgisayarları ve sunucuları görüntüleyin ve yönetin.</p>
         </div>
-        <button className="btn btn-primary" onClick={onAddClick} id="add-device-btn">
-          <span>➕</span> Cihaz Ekle
-        </button>
+        <div className="page-actions">
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={handleFileChange}
+            accept=".xlsx, .xls"
+            style={{ display: 'none' }}
+          />
+          {role !== 'viewer' && (
+            <Button variant="secondary" icon={Upload} onClick={handleImportClick}>
+              Excel İçe Aktar
+            </Button>
+          )}
+          <Button variant="secondary" icon={Download} onClick={onExportExcel}>
+            Excel Dışa Aktar
+          </Button>
+          {role !== 'viewer' && (
+            <Button variant="primary" icon={Plus} onClick={onAddClick}>
+              Yeni Cihaz
+            </Button>
+          )}
+        </div>
       </div>
 
-      <div className="table-container">
+      {/* Top Metric Mini Cards */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px', marginBottom: '20px' }}>
+        <div className="card" style={{ padding: '14px 18px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <div style={{ width: '38px', height: '38px', borderRadius: 'var(--radius-md)', backgroundColor: '#eff6ff', color: '#2563eb', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Monitor size={18} />
+          </div>
+          <div>
+            <div style={{ fontSize: '20px', fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1.1 }}>{totalCount}</div>
+            <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Toplam Cihaz</div>
+          </div>
+        </div>
+
+        <div className="card" style={{ padding: '14px 18px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <div style={{ width: '38px', height: '38px', borderRadius: 'var(--radius-md)', backgroundColor: '#ecfdf5', color: '#10b981', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <CheckCircle2 size={18} />
+          </div>
+          <div>
+            <div style={{ fontSize: '20px', fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1.1 }}>{onlineCount}</div>
+            <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Online</div>
+          </div>
+        </div>
+
+        <div className="card" style={{ padding: '14px 18px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <div style={{ width: '38px', height: '38px', borderRadius: 'var(--radius-md)', backgroundColor: '#fef2f2', color: '#ef4444', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <XCircle size={18} />
+          </div>
+          <div>
+            <div style={{ fontSize: '20px', fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1.1 }}>{offlineCount}</div>
+            <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Offline</div>
+          </div>
+        </div>
+
+        <div className="card" style={{ padding: '14px 18px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <div style={{ width: '38px', height: '38px', borderRadius: 'var(--radius-md)', backgroundColor: '#fffbeb', color: '#f59e0b', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <AlertTriangle size={18} />
+          </div>
+          <div>
+            <div style={{ fontSize: '20px', fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1.1 }}>{warningCount}</div>
+            <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Uyarı</div>
+          </div>
+        </div>
+      </div>
+
+      {/* Filter Bar & DataTable */}
+      <div className="table-wrapper">
+        <div className="table-toolbar">
+          <div className="table-toolbar-left">
+            <div className="search-field">
+              <span className="search-field-icon"><Search size={15} /></span>
+              <input
+                type="text"
+                className="search-field-input"
+                placeholder="Hostname, IP, Kullanıcı ara..."
+                value={search}
+                onChange={e => onSearchChange(e.target.value)}
+              />
+            </div>
+
+            <select
+              className="form-select"
+              style={{ width: '150px', height: '36px' }}
+              value={statusFilter}
+              onChange={e => onStatusFilterChange(e.target.value)}
+            >
+              <option value="all">Tüm Durumlar</option>
+              <option value="online">Online</option>
+              <option value="offline">Offline</option>
+              <option value="warning">Uyarı</option>
+            </select>
+
+            <select
+              className="form-select"
+              style={{ width: '180px', height: '36px' }}
+              value={departmentFilter}
+              onChange={e => onDepartmentFilterChange(e.target.value)}
+            >
+              <option value="">Tüm Departmanlar</option>
+              {departments.map(d => (
+                <option key={d} value={d}>{d}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="table-toolbar-right" style={{ fontSize: '12.5px', color: 'var(--text-muted)' }}>
+            Gösterilen: <strong>{sorted.length}</strong> / {devices.length}
+          </div>
+        </div>
+
         {sorted.length === 0 ? (
-          <div className="empty-state">
-            <div className="empty-icon">🖥️</div>
-            <div className="empty-title">Henüz cihaz eklenmemiş</div>
-            <div className="empty-text">Cihaz ekleyerek ağ izlemeye başlayın</div>
+          <div className="empty-state-box">
+            <div className="empty-state-icon"><Monitor size={28} /></div>
+            <div className="empty-state-title">Eşleşen Cihaz Bulunamadı</div>
+            <div className="empty-state-desc">Arama kriterlerinizi değiştirin veya yeni cihaz ekleyin.</div>
           </div>
         ) : (
-          <table className="device-table">
-            <thead>
-              <tr>
-                {COLUMNS.map(col => (
-                  <th
-                    key={col.key}
-                    onClick={() => handleSort(col.key)}
-                    className={sortBy === col.key ? 'sorted' : ''}
-                  >
-                    {col.label}
-                    {col.sortable && sortBy === col.key && (
-                      <span className="sort-arrow">{sortOrder === 'asc' ? '▲' : '▼'}</span>
-                    )}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {sorted.map(device => (
-                <tr key={device.id} className={`status-${device.status}`}>
-                  <td><StatusBadge status={device.status} /></td>
-                  <td>
-                    <strong 
-                      style={{ cursor: 'pointer', color: 'var(--accent-blue)' }}
-                      onClick={() => onRowClick && onRowClick(device)}
-                      title="Detayları görüntüle"
-                    >
-                      {device.hostname}
-                    </strong>
-                  </td>
-                  <td style={{ fontFamily: 'monospace' }}>{device.ip_address}</td>
-                  <td>{device.department || '—'}</td>
-                  <td>{device.os_name || '—'}</td>
-                  <td>{device.username || '—'}</td>
-                  <td>
-                    {device.cpu_usage !== null && device.cpu_usage !== undefined ? (
-                      <span style={{ color: getUsageColor(device.cpu_usage), fontWeight: 'bold' }}>
-                        {device.cpu_usage}%
-                      </span>
-                    ) : '—'}
-                  </td>
-                  <td>
-                    {device.ram_usage !== null && device.ram_usage !== undefined ? (
-                      <span style={{ color: getUsageColor(device.ram_usage), fontWeight: 'bold' }}>
-                        {device.ram_usage}%
-                      </span>
-                    ) : '—'}
-                  </td>
-                  <td>{formatUptime(device.uptime_seconds)}</td>
-                  <td>
-                    {device.ping_ms !== null && device.ping_ms !== undefined ? (
-                      <span className={`ping-value ${getPingClass(device.ping_ms)}`}>
-                        {device.ping_ms} ms
-                      </span>
-                    ) : '—'}
-                  </td>
-                  <td>
-                    <span className="relative-time">{getRelativeTime(device.last_seen)}</span>
-                  </td>
-                  <td>
-                    <span className={`agent-badge ${device.agent_installed ? 'installed' : 'not-installed'}`}>
-                      {device.agent_installed ? '✅ Agent' : '—'}
-                    </span>
-                  </td>
-                  <td>
-                    <div className="action-buttons">
-                      <button
-                        className="action-btn"
-                        onClick={() => onEdit(device)}
-                        title="Düzenle"
-                      >
-                        ✏️
-                      </button>
-                      <button
-                        className="action-btn delete"
-                        onClick={() => onDelete(device)}
-                        title="Sil"
-                      >
-                        🗑️
-                      </button>
-                    </div>
-                  </td>
+          <div className="data-table-container">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>DURUM</th>
+                  <th>CİHAZ ADI</th>
+                  <th>IP ADRESİ</th>
+                  <th>DEPARTMAN</th>
+                  <th>İŞLETİM SİSTEMİ</th>
+                  <th>KULLANICI</th>
+                  <th>CPU</th>
+                  <th>RAM</th>
+                  <th>UPTIME</th>
+                  <th>PING</th>
+                  <th>SON GÖRÜLME</th>
+                  <th>AGENT</th>
+                  <th style={{ textAlign: 'right' }}>İŞLEMLER</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {sorted.map(device => (
+                  <tr
+                    key={device.id}
+                    className="row-clickable"
+                    onClick={() => onRowClick && onRowClick(device)}
+                  >
+                    <td><StatusBadge status={device.status} /></td>
+                    <td>
+                      <strong style={{ color: 'var(--primary)' }}>
+                        {device.hostname}
+                      </strong>
+                    </td>
+                    <td style={{ fontFamily: 'var(--font-mono)', fontSize: '12px' }}>
+                      {device.ip_address}
+                    </td>
+                    <td>{device.department || '—'}</td>
+                    <td style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                      {device.os_name || '—'}
+                    </td>
+                    <td>{device.username || '—'}</td>
+                    <td>
+                      {device.cpu_usage !== null && device.cpu_usage !== undefined ? (
+                        <span style={{ color: getUsageColor(device.cpu_usage), fontWeight: 600 }}>
+                          %{device.cpu_usage}
+                        </span>
+                      ) : (
+                        <span style={{ color: 'var(--text-muted)', fontSize: '11.5px' }} title={device.cpu_description}>
+                          {formatCpuDescription(device.cpu_description)}
+                        </span>
+                      )}
+                    </td>
+                    <td>
+                      {device.ram_usage !== null && device.ram_usage !== undefined ? (
+                        <span style={{ color: getUsageColor(device.ram_usage), fontWeight: 600 }}>
+                          %{device.ram_usage}
+                        </span>
+                      ) : (
+                        <span style={{ color: 'var(--text-muted)', fontSize: '11.5px' }}>
+                          {device.ram_mb ? (device.ram_mb >= 1024 ? `${Math.round(device.ram_mb / 1024)} GB` : `${device.ram_mb} MB`) : '—'}
+                        </span>
+                      )}
+                    </td>
+                    <td style={{ fontSize: '12px' }}>{formatUptime(device.uptime_seconds)}</td>
+                    <td>
+                      {device.ping_ms !== null && device.ping_ms !== undefined ? (
+                        <span style={{
+                          fontWeight: 600,
+                          fontSize: '12px',
+                          color: device.ping_ms <= 50 ? 'var(--status-online)' : device.ping_ms <= 150 ? 'var(--status-warning)' : 'var(--status-offline)'
+                        }}>
+                          {device.ping_ms} ms
+                        </span>
+                      ) : '—'}
+                    </td>
+                    <td style={{ fontSize: '11.5px', color: 'var(--text-muted)' }}>
+                      {getRelativeTime(device.last_seen)}
+                    </td>
+                    <td>
+                      <span className={`status-badge ${device.agent_installed ? 'online' : 'neutral'}`} style={{ fontSize: '11px', padding: '2px 7px' }}>
+                        {device.agent_installed ? 'Agent Aktif' : 'Yok'}
+                      </span>
+                    </td>
+                    <td style={{ textAlign: 'right' }} onClick={(e) => e.stopPropagation()}>
+                      <div style={{ display: 'inline-flex', gap: '4px' }}>
+                        {role !== 'viewer' && (
+                          <button
+                            className="btn-icon btn-ghost btn-xs"
+                            onClick={() => onEdit(device)}
+                            title="Düzenle"
+                          >
+                            <Edit2 size={13} />
+                          </button>
+                        )}
+                        {role === 'admin' && (
+                          <button
+                            className="btn-icon btn-outline-danger btn-xs"
+                            onClick={() => onDelete(device)}
+                            title="Sil"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
-    </>
+    </div>
   );
 }
