@@ -8,6 +8,22 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# Environment files
+.env
+**/.env
+.env.*
+**/.env.*
+!.env.example
+!**/.env.example
+
+# Binaries & compiled artifacts
+*.exe
+*.dll
+*.so
+*.dylib
+agent/dist/
+agent/build/
+
 # Production build artifacts
 dist/
 dist-ssr/
@@ -16,10 +32,6 @@ build/
 # Local backups
 Yedek/
 Yedek2/
-
-# Environment files
-.env.local
-.env.*.local
 
 # Logs
 *.log
