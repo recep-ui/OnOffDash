@@ -26,6 +26,8 @@ function getAgentBinaryInfo() {
     };
 }
 
+const { signManifest } = require('../utils/agentSigner');
+
 // GET /api/agent/version — Güncel agent versiyon ve SHA-256 bütünlük bilgisi
 router.get('/version', authenticateAgent, (req, res) => {
     try {
@@ -38,6 +40,13 @@ router.get('/version', authenticateAgent, (req, res) => {
         if (binaryInfo) {
             versionData.sha256 = versionData.sha256 || binaryInfo.sha256;
             versionData.size = versionData.size || binaryInfo.size;
+        }
+
+        if (!versionData.signature && versionData.sha256) {
+            const signature = signManifest(versionData);
+            if (signature) {
+                versionData.signature = signature;
+            }
         }
 
         res.json(versionData);

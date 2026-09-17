@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import FileDropzone from '../../components/file-tools/FileDropzone';
 import { useNotification } from '../../components/NotificationProvider';
+import { downloadFileWithAuth } from '../../services/api';
 
 export default function PngToJpgPage({ onBack }) {
   const { showToast } = useNotification();
@@ -65,13 +66,13 @@ export default function PngToJpgPage({ onBack }) {
     }
   };
 
-  const triggerDownload = (url) => {
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `${file.name.substring(0, file.name.lastIndexOf('.'))}.jpg`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+  const triggerDownload = async (url) => {
+    try {
+      const fallbackName = file ? `${file.name.substring(0, file.name.lastIndexOf('.'))}.jpg` : 'converted.jpg';
+      await downloadFileWithAuth(url, fallbackName);
+    } catch (err) {
+      showToast('error', '❌ İndirme Hatası', err.message || 'Dosya indirilemedi.');
+    }
   };
 
   const formatSize = (bytes) => {

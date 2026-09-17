@@ -9,7 +9,7 @@ Bu dosya, projeye geri dönüş tarihimiz itibariyle yapılan analizleri, sistem
 Yapay zeka ajanı tarafından yapılan kod analizi, projenin tamamen MSSQL veri tabanına göç ettiğini, ancak PostgreSQL uyumlu sorgu yapısı kullanmaya devam ettiğini doğrulamıştır. Projedeki tüm 5 yeni özellik (Bildirim Sistemi, Toner Pulse Animasyonlu Badge, Recharts Grafik Detay Modalı, Ajan Otomatik Güncelleme ve Kapsamlı Yazılım Envanteri) kod seviyesinde entegre edilmiş ve tamamlanmıştır. Ajan ayrıca Python ile yazılmış bağımsız `pdf-service` ve `file-service` mikroservislerinin de projeye sorunsuz dahil edildiğini doğrulamıştır.
 
 ## 3. Tespit Edilen Mevcut Durum
-* **Veritabanı Yapısı:** `db/migrations.js` içerisindeki tüm veri tabloları SQL Server Express üzerinde sorunsuz oluşturulmaktadır. Default `admin` / `admin123` kullanıcısı otomatik oluşturulur.
+* **Veritabanı Yapısı:** `db/migrations.js` içerisindeki tüm veri tabloları SQL Server Express üzerinde sorunsuz oluşturulmaktadır. Güvenli bootstrap admin kullanıcısı ortam değişkenleri ile oluşturulur.
 * **Ağ İzleme:** Cihazların ping durumları periyodik sorgulanmakta ve `PingService` üzerinden Socket.IO ile canlı yayınlanmaktadır.
 * **Yazıcı İzleme:** SNMP ve fall-back HTML kazıma yöntemleri çalışmaktadır. Toner seviyeleri ve kağıt sıkışma logları veritabanında tutulmaktadır.
 * **Ajan Telemetrisi:** Windows ajan yazılımı PowerShell ve Registry sorguları yardımıyla Store/Registry yazılım listesini ve donanım kullanım verilerini Express API'ye gönderebilmektedir.

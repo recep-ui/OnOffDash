@@ -13,7 +13,7 @@ Bu dokümanda OnOffDash V2 projesinin mevcut durumdan güvenli çalışmaya ve y
 ### Aşama 2: Lokal Çalıştırma ve Çevre Kontrolleri
 - [ ] Docker ve Docker Compose ortamının kontrol edilmesi.
 - [ ] `docker-compose up -d --build` komutu ile tüm servislerin (DB, Express, React, PDF ve File tools) yerel makinede ayağa kaldırılması.
-- [ ] SQL Server Express konteynerinin ayağa kalkışında migrations scriptinin (`db/migrations.js`) sorunsuz çalıştığının ve default admin kullanıcısının (`admin` / `admin123`) veritabanına eklendiğinin teyit edilmesi.
+- [ ] SQL Server Express konteynerinin ayağa kalkışında migrations scriptinin (`db/migrations.js`) sorunsuz çalıştığının ve güvenli bootstrap admin kullanıcısının (`BOOTSTRAP_ADMIN_USERNAME`) veritabanına eklendiğinin teyit edilmesi.
 - [ ] Arayüzün Nginx üzerinden port 80'de düzgün servis edildiğinin doğrulanması.
 
 ### Aşama 3: Eksikliklerin Giderilmesi ve Güvenlik Sıkılaştırma

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import FileDropzone from '../../components/pdf/FileDropzone';
 import { useNotification } from '../../components/NotificationProvider';
+import { downloadFileWithAuth } from '../../services/api';
 
 export default function WatermarkPdfPage({ onBack }) {
   const { showToast } = useNotification();
@@ -8,8 +9,8 @@ export default function WatermarkPdfPage({ onBack }) {
   const [text, setText] = useState('');
   const [color, setColor] = useState('#ef4444');
   const [opacity, setOpacity] = useState(0.3);
-  const [fontSize, setFontSize] = useState(50);
-  const [rotation, setRotation] = useState(0); // 0, 90, 180, 270
+  const [fontSize, setFontSize] = useState(48);
+  const [rotation, setRotation] = useState(45); // 0, 45, 90, 180, 270
   const [loading, setLoading] = useState(false);
   const [downloadUrl, setDownloadUrl] = useState(null);
 
@@ -36,11 +37,11 @@ export default function WatermarkPdfPage({ onBack }) {
 
     const formData = new FormData();
     formData.append('file', file);
-    formData.append('text', text);
+    formData.append('text', text.trim());
     formData.append('color', color);
-    formData.append('opacity', opacity.toString());
-    formData.append('font_size', fontSize.toString());
-    formData.append('rotation', rotation.toString());
+    formData.append('opacity', opacity);
+    formData.append('font_size', fontSize);
+    formData.append('rotation', rotation);
 
     const token = localStorage.getItem('token');
     const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
@@ -60,7 +61,7 @@ export default function WatermarkPdfPage({ onBack }) {
       const result = await response.json();
       if (result.success && result.download_url) {
         setDownloadUrl(result.download_url);
-        showToast('success', '✅ Başarılı', 'Filigran başarıyla eklendi.');
+        showToast('success', '✅ Filigran Eklendi', 'PDF dosyasına başarıyla filigran eklendi.');
         triggerDownload(result.download_url);
       }
     } catch (err) {
@@ -71,13 +72,12 @@ export default function WatermarkPdfPage({ onBack }) {
     }
   };
 
-  const triggerDownload = (url) => {
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `filigranli_${file.name}`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+  const triggerDownload = async (url) => {
+    try {
+      await downloadFileWithAuth(url, `filigranli_${file ? file.name : 'dokuman.pdf'}`);
+    } catch (err) {
+      showToast('error', '❌ İndirme Hatası', err.message || 'Dosya indirilemedi.');
+    }
   };
 
   return (

@@ -4,6 +4,7 @@ const { pool } = require('../db/connection');
 const xlsx = require('xlsx');
 const { requireRole } = require('../middleware/auth');
 const { sanitizeRows } = require('../utils/excelSanitizer');
+const { isValidIP, isValidMAC, sanitizePagination } = require('../utils/validators');
 
 // Helper to normalize keys
 function getNormalizedRow(row) {
@@ -335,7 +336,7 @@ router.get('/toners/stock', async (req, res) => {
 // GET /api/printers/toners/replacements — Toner değişim geçmişini getir
 router.get('/toners/replacements', async (req, res) => {
     try {
-        const limit = parseInt(req.query.limit) || 100;
+        const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 100, 1), 500);
         const result = await pool.query(`SELECT TOP (${limit}) * FROM toner_replacements ORDER BY replacement_date DESC, id DESC`);
         res.json(result.rows);
     } catch (err) {
@@ -379,6 +380,10 @@ router.post('/', requireRole('operator'), async (req, res) => {
 
         if (!name || !ip_address) {
             return res.status(400).json({ error: 'name and ip_address are required' });
+        }
+
+        if (!isValidIP(ip_address)) {
+            return res.status(400).json({ error: 'Invalid IP address format' });
         }
 
         const printerResult = await pool.query(
@@ -444,6 +449,10 @@ router.put('/:id', requireRole('operator'), async (req, res) => {
             printer_status, total_page_count, location, department, description, 
             print_type, serial_no, toner_model, toners 
         } = req.body;
+
+        if (ip_address && !isValidIP(ip_address)) {
+            return res.status(400).json({ error: 'Invalid IP address format' });
+        }
 
         const result = await pool.query(
             `UPDATE printers SET
@@ -531,7 +540,7 @@ router.delete('/:id', requireRole('admin'), async (req, res) => {
 // GET /api/printers/:id/jamlogs — Jam log geçmişi
 router.get('/:id/jamlogs', async (req, res) => {
     try {
-        const limit = parseInt(req.query.limit) || 50;
+        const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 500);
         const result = await pool.query(
             `SELECT TOP (${limit}) * FROM printer_jam_logs WHERE printer_id = $1 ORDER BY created_at DESC`,
             [req.params.id]

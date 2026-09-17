@@ -6,10 +6,44 @@ const { execSync } = require('child_process');
 const config = require('./config');
 
 const CURRENT_VERSION = require('./package.json').version;
+const PUBLIC_KEY_FILE = path.join(__dirname, 'agent_update_public.pem');
+
+function getAgentPublicKey() {
+    if (process.env.AGENT_UPDATE_PUBLIC_KEY) {
+        return process.env.AGENT_UPDATE_PUBLIC_KEY;
+    }
+    if (fs.existsSync(PUBLIC_KEY_FILE)) {
+        return fs.readFileSync(PUBLIC_KEY_FILE, 'utf8');
+    }
+    return null;
+}
+
+function verifySignature(versionData, expectedSha256, signature, publicKey) {
+    if (!publicKey || !signature) return false;
+    try {
+        const payload = `${versionData.version || ''}:${String(expectedSha256 || '').toLowerCase()}:${versionData.size || ''}`;
+        const verifier = crypto.createVerify('SHA256');
+        verifier.update(payload);
+        return verifier.verify(publicKey, signature, 'base64');
+    } catch (err) {
+        console.error('   ❌ İmza doğrulama hatası:', err.message);
+        return false;
+    }
+}
+
+function isHttpsRequired() {
+    const isDev = process.env.NODE_ENV === 'development' || process.env.ALLOW_INSECURE_HTTP === 'true';
+    return !isDev;
+}
 
 async function checkForUpdate() {
     try {
         console.log(`🔄 Güncelleme kontrol ediliyor... (Mevcut: v${CURRENT_VERSION})`);
+
+        if (isHttpsRequired() && config.serverUrl && !config.serverUrl.startsWith('https://')) {
+            console.error(`   ❌ GÜVENLİK HATASI: Production ortamında sunucu URL'i HTTPS olmak zorundadır! (Verilen: ${config.serverUrl})`);
+            return false;
+        }
 
         const url = `${config.serverUrl}/api/agent/version`;
         const headers = {};
@@ -74,21 +108,38 @@ async function downloadAndUpdate(versionData = {}) {
             return false;
         }
 
-        // 2. SHA-256 Bütünlük Doğrulaması (Supply-Chain Verification)
-        const computedSha256 = crypto.createHash('sha256').update(buffer).digest('hex');
+        // 2. SHA-256 Bütünlük Doğrulaması (Supply-Chain Verification - FAIL-CLOSED)
         const expectedSha256 = versionData.sha256 || response.headers.get('x-agent-sha256');
+        if (!expectedSha256) {
+            console.error('   ❌ KRİTİK GÜVENLİK UYARISI: Sunucu SHA-256 sağlama değeri sağlamadı! Güncelleme reddedildi (Fail-closed).');
+            return false;
+        }
 
-        if (expectedSha256) {
-            if (computedSha256.toLowerCase() !== expectedSha256.toLowerCase()) {
-                console.error('   ❌ KRİTİK GÜVENLİK UYARISI: İndirilen dosyanın SHA-256 özeti sunucu manifesti ile EŞLEŞMİYOR!');
-                console.error(`      Hesaplanan: ${computedSha256}`);
-                console.error(`      Beklenen:   ${expectedSha256}`);
-                console.error('      Güncelleme iptal edildi. Orijinal ajan çalışmaya devam ediyor.');
+        const computedSha256 = crypto.createHash('sha256').update(buffer).digest('hex');
+        if (computedSha256.toLowerCase() !== expectedSha256.toLowerCase()) {
+            console.error('   ❌ KRİTİK GÜVENLİK UYARISI: İndirilen dosyanın SHA-256 özeti sunucu manifesti ile EŞLEŞMİYOR!');
+            console.error(`      Hesaplanan: ${computedSha256}`);
+            console.error(`      Beklenen:   ${expectedSha256}`);
+            console.error('      Güncelleme iptal edildi. Orijinal ajan çalışmaya devam ediyor.');
+            return false;
+        }
+        console.log('   🛡️ SHA-256 bütünlük doğrulaması BAŞARILI.');
+
+        // 3. RSA Dijital İmza Doğrulaması (Manifest Signature)
+        const publicKey = getAgentPublicKey();
+        const requireSignature = process.env.REQUIRE_AGENT_SIGNATURE === 'true' || !!publicKey;
+
+        if (requireSignature) {
+            if (!versionData.signature) {
+                console.error('   ❌ KRİTİK GÜVENLİK HATASI: Güncelleme manifestinde dijital imza bulunamadı! Güncelleme reddedildi.');
                 return false;
             }
-            console.log('   🛡️ SHA-256 bütünlük doğrulaması BAŞARILI.');
-        } else {
-            console.warn('   ⚠️ Sunucu SHA-256 sağlama değeri sağlamadı. Dikkatli olun.');
+            const isSigValid = verifySignature(versionData, expectedSha256, versionData.signature, publicKey);
+            if (!isSigValid) {
+                console.error('   ❌ KRİTİK GÜVENLİK HATASI: İndirilen güncellemenin dijital imzası GEÇERSİZ! Olası kurcalama tespit edildi.');
+                return false;
+            }
+            console.log('   🛡️ RSA dijital imza doğrulaması BAŞARILI.');
         }
 
         // Yeni dosyayı kaydet
@@ -167,4 +218,13 @@ function compareVersions(a, b) {
     return 0;
 }
 
-module.exports = { checkForUpdate, CURRENT_VERSION, compareVersions };
+module.exports = {
+    checkForUpdate,
+    downloadAndUpdate,
+    CURRENT_VERSION,
+    compareVersions,
+    verifySignature,
+    getAgentPublicKey,
+    isHttpsRequired
+};
+

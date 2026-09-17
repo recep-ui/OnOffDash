@@ -4,6 +4,7 @@ const { pool } = require('../db/connection');
 const xlsx = require('xlsx');
 const { requireRole } = require('../middleware/auth');
 const { sanitizeRows } = require('../utils/excelSanitizer');
+const { isValidIP, isValidMAC, isValidHostname, sanitizePagination } = require('../utils/validators');
 
 // GET /api/devices — Tüm cihazları listele
 router.get('/', async (req, res) => {
@@ -357,6 +358,14 @@ router.post('/', requireRole('operator'), async (req, res) => {
             return res.status(400).json({ error: 'hostname and ip_address are required' });
         }
 
+        if (!isValidIP(ip_address)) {
+            return res.status(400).json({ error: 'Invalid IP address format' });
+        }
+
+        if (mac_address && !isValidMAC(mac_address)) {
+            return res.status(400).json({ error: 'Invalid MAC address format' });
+        }
+
         const result = await pool.query(
             `MERGE INTO devices AS target
              USING (VALUES ($1, $2, $3, $4, $5, $6, $7)) AS source (hostname, ip_address, mac_address, department, os_name, username, notes)
@@ -404,6 +413,14 @@ router.put('/:id', requireRole('operator'), async (req, res) => {
             monitor_model, monitor_serial, keyboard_model, keyboard_serial,
             mouse_model, mouse_serial, phone_model, phone_serial
         } = req.body;
+
+        if (ip_address && !isValidIP(ip_address)) {
+            return res.status(400).json({ error: 'Invalid IP address format' });
+        }
+
+        if (mac_address && !isValidMAC(mac_address)) {
+            return res.status(400).json({ error: 'Invalid MAC address format' });
+        }
 
         const parsedCpuCores = cpu_cores !== undefined && cpu_cores !== '' ? parseInt(cpu_cores, 10) : null;
         const parsedRamMb = ram_mb !== undefined && ram_mb !== '' ? parseInt(ram_mb, 10) : null;
@@ -465,8 +482,9 @@ router.put('/:id', requireRole('operator'), async (req, res) => {
 // DELETE /api/devices/:id — Cihaz sil
 router.delete('/:id', requireRole('admin'), async (req, res) => {
     try {
-        const result = await pool.query('DELETE FROM devices OUTPUT DELETED.id WHERE id = $1', [req.params.id]);
-        if (result.rows.length === 0) {
+        const result = await pool.query('DELETE FROM devices WHERE id = $1', [req.params.id]);
+
+        if (result.rowCount === 0) {
             return res.status(404).json({ error: 'Device not found' });
         }
 
@@ -482,7 +500,7 @@ router.delete('/:id', requireRole('admin'), async (req, res) => {
 // GET /api/devices/:id/logs — Durum logları
 router.get('/:id/logs', async (req, res) => {
     try {
-        const limit = parseInt(req.query.limit) || 50;
+        const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 500);
         const result = await pool.query(
             `SELECT TOP (${limit}) * FROM device_status_logs WHERE device_id = $1 ORDER BY checked_at DESC`,
             [req.params.id]
@@ -496,8 +514,8 @@ router.get('/:id/logs', async (req, res) => {
 // GET /api/devices/:id/heartbeats — Son heartbeat'ler (zaman filtreli)
 router.get('/:id/heartbeats', async (req, res) => {
     try {
-        const limit = parseInt(req.query.limit) || 200;
-        const hours = parseInt(req.query.hours) || 0;
+        const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 200, 1), 500);
+        const hours = parseInt(req.query.hours, 10) || 0;
 
         let query = `SELECT TOP (${limit}) * FROM heartbeats WHERE device_id = $1`;
         const params = [req.params.id];

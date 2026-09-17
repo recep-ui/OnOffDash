@@ -1,10 +1,15 @@
 import os
 import unittest
+import asyncio
 import jwt
 
 os.environ["JWT_SECRET"] = "this-is-a-test-jwt-secret-key-at-least-32-chars-long"
 
-from app.utils.auth import verify_jwt_token, HTTPException
+from app.utils.auth import verify_jwt_token, require_authenticated_user, HTTPException
+
+class DummyCredentials:
+    def __init__(self, token):
+        self.credentials = token
 
 class TestPdfAuth(unittest.TestCase):
     def setUp(self):
@@ -29,11 +34,22 @@ class TestPdfAuth(unittest.TestCase):
         )
         with self.assertRaises(HTTPException) as ctx:
             verify_jwt_token(tampered_token)
-        self.assertEqual(ctx.exception.status_code, 403)
+        self.assertEqual(ctx.exception.status_code, 401)
 
     def test_empty_token_rejection(self):
         with self.assertRaises(HTTPException) as ctx:
             verify_jwt_token("")
+        self.assertEqual(ctx.exception.status_code, 401)
+
+    def test_require_authenticated_user_with_bearer(self):
+        creds = DummyCredentials(self.valid_token)
+        user = asyncio.run(require_authenticated_user(None, creds))
+        self.assertEqual(user["id"], 42)
+        self.assertEqual(user["username"], "pdf_operator")
+
+    def test_require_authenticated_user_missing_credentials(self):
+        with self.assertRaises(HTTPException) as ctx:
+            asyncio.run(require_authenticated_user(None, None))
         self.assertEqual(ctx.exception.status_code, 401)
 
 if __name__ == "__main__":

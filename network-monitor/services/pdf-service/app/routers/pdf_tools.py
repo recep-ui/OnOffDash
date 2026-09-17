@@ -84,7 +84,7 @@ async def merge_files(files: list[UploadFile] = File(...), user: dict = Depends(
             saved_paths.append(path)
             total_size += os.path.getsize(path)
             
-        merged_path = pdf_ops.merge_pdfs(saved_paths)
+        merged_path = pdf_ops.merge_pdfs(saved_paths, user_id=user_id)
         output_size = os.path.getsize(merged_path)
         finished_at = datetime.datetime.now()
         
@@ -107,6 +107,21 @@ async def merge_files(files: list[UploadFile] = File(...), user: dict = Depends(
             "file_id": file_id,
             "download_url": f"/api/pdf/download/{file_id}"
         }
+    except ValueError as ve:
+        finished_at = datetime.datetime.now()
+        logger.log_job(
+            operation_type="merge",
+            input_file_count=len(files),
+            total_input_size=total_size,
+            output_file_size=None,
+            status="error",
+            created_at=created_at,
+            finished_at=finished_at,
+            expires_at=None,
+            error_message=str(ve),
+            user_id=user_id
+        )
+        raise HTTPException(status_code=400, detail=str(ve))
     except Exception as e:
         finished_at = datetime.datetime.now()
         logger.log_job(
@@ -139,7 +154,7 @@ async def split_file(file: UploadFile = File(...), range_str: str = Form(...), u
         file_path = await save_upload_file(file)
         file_size = os.path.getsize(file_path)
         
-        split_path = pdf_ops.split_pdf(file_path, range_str)
+        split_path = pdf_ops.split_pdf(file_path, range_str, user_id=user_id)
         output_size = os.path.getsize(split_path)
         finished_at = datetime.datetime.now()
         
@@ -217,7 +232,7 @@ async def reorder_file(file: UploadFile = File(...), page_configs: str = Form(..
         file_path = await save_upload_file(file)
         file_size = os.path.getsize(file_path)
         
-        manipulated_path = pdf_ops.reorder_rotate_delete_pdf(file_path, configs)
+        manipulated_path = pdf_ops.reorder_rotate_delete_pdf(file_path, configs, user_id=user_id)
         output_size = os.path.getsize(manipulated_path)
         finished_at = datetime.datetime.now()
         
@@ -240,6 +255,21 @@ async def reorder_file(file: UploadFile = File(...), page_configs: str = Form(..
             "file_id": file_id,
             "download_url": f"/api/pdf/download/{file_id}"
         }
+    except ValueError as ve:
+        finished_at = datetime.datetime.now()
+        logger.log_job(
+            operation_type="reorder",
+            input_file_count=1,
+            total_input_size=file_size,
+            output_file_size=None,
+            status="error",
+            created_at=created_at,
+            finished_at=finished_at,
+            expires_at=None,
+            error_message=str(ve),
+            user_id=user_id
+        )
+        raise HTTPException(status_code=400, detail=str(ve))
     except Exception as e:
         finished_at = datetime.datetime.now()
         logger.log_job(
@@ -275,7 +305,7 @@ async def compress_file(file: UploadFile = File(...), quality: str = Form("mediu
         file_path = await save_upload_file(file)
         file_size = os.path.getsize(file_path)
         
-        compressed_path = pdf_ops.compress_pdf(file_path, quality)
+        compressed_path = pdf_ops.compress_pdf(file_path, quality, user_id=user_id)
         output_size = os.path.getsize(compressed_path)
         finished_at = datetime.datetime.now()
         
@@ -298,6 +328,21 @@ async def compress_file(file: UploadFile = File(...), quality: str = Form("mediu
             "file_id": file_id,
             "download_url": f"/api/pdf/download/{file_id}"
         }
+    except ValueError as ve:
+        finished_at = datetime.datetime.now()
+        logger.log_job(
+            operation_type="compress",
+            input_file_count=1,
+            total_input_size=file_size,
+            output_file_size=None,
+            status="error",
+            created_at=created_at,
+            finished_at=finished_at,
+            expires_at=None,
+            error_message=str(ve),
+            user_id=user_id
+        )
+        raise HTTPException(status_code=400, detail=str(ve))
     except Exception as e:
         finished_at = datetime.datetime.now()
         logger.log_job(
@@ -344,7 +389,8 @@ async def watermark_file(
             color_hex=color, 
             opacity=opacity, 
             font_size=font_size, 
-            rotation=rotation
+            rotation=rotation,
+            user_id=user_id
         )
         output_size = os.path.getsize(watermarked_path)
         finished_at = datetime.datetime.now()
@@ -368,6 +414,21 @@ async def watermark_file(
             "file_id": file_id,
             "download_url": f"/api/pdf/download/{file_id}"
         }
+    except ValueError as ve:
+        finished_at = datetime.datetime.now()
+        logger.log_job(
+            operation_type="watermark",
+            input_file_count=1,
+            total_input_size=file_size,
+            output_file_size=None,
+            status="error",
+            created_at=created_at,
+            finished_at=finished_at,
+            expires_at=None,
+            error_message=str(ve),
+            user_id=user_id
+        )
+        raise HTTPException(status_code=400, detail=str(ve))
     except Exception as e:
         finished_at = datetime.datetime.now()
         logger.log_job(
@@ -390,15 +451,23 @@ async def watermark_file(
 @router.get("/download/{file_id}")
 async def download_file(file_id: str, background_tasks: BackgroundTasks, user: dict = Depends(require_authenticated_user)):
     """
-    Serves the output PDF file and schedules it for deletion in the background.
+    Serves the output PDF file and checks ownership against requesting user.
     """
-    # Prevent directory traversal
     safe_name = os.path.basename(file_id)
     file_path = os.path.join(OUTPUT_DIR, safe_name)
     
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="File not found or expired.")
         
+    user_id = user.get("id")
+    role = user.get("role", "")
+    if safe_name.startswith("u"):
+        parts = safe_name.split("_", 1)
+        if len(parts) > 1 and parts[0][1:].isdigit():
+            owner_id = int(parts[0][1:])
+            if role != "admin" and user_id is not None and owner_id != int(user_id):
+                raise HTTPException(status_code=403, detail="You do not have permission to access this file.")
+
     return FileResponse(
         file_path, 
         media_type="application/pdf", 

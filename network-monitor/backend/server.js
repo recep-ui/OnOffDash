@@ -7,7 +7,8 @@ const cors = require('cors');
 const cron = require('node-cron');
 
 const { ensureDatabase } = require('./db/connection');
-const { runMigrations } = require('./db/migrations');
+const { runMigrations, ensureBootstrapAdmin } = require('./db/migrations');
+const { validateConfig } = require('./utils/configValidator');
 const PingService = require('./services/pingService');
 const PrinterMonitorService = require('./services/printerMonitorService');
 const CleanupService = require('./services/cleanupService');
@@ -32,9 +33,13 @@ const jwt = require('jsonwebtoken');
 const app = express();
 const server = http.createServer(app);
 
-// CORS configuration
-const allowedOrigins = process.env.CORS_ORIGIN 
-    ? process.env.CORS_ORIGIN.split(',').map(s => s.trim())
+// Trust first proxy (Nginx) for accurate client IP in express-rate-limit
+app.set('trust proxy', 1);
+
+// Standardized CORS_ORIGINS configuration
+const rawOrigins = process.env.CORS_ORIGINS || process.env.CORS_ORIGIN;
+const allowedOrigins = rawOrigins 
+    ? rawOrigins.split(',').map(s => s.trim()).filter(Boolean)
     : ['http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:80', 'http://localhost:3000', 'http://localhost'];
 
 const corsOptions = {
@@ -57,12 +62,11 @@ const io = new Server(server, {
     }
 });
 
-// Socket.IO JWT Authentication Middleware
+// Socket.IO JWT Authentication Middleware (Strict: auth.token or Authorization header only, NO query token)
 const JWT_SECRET = process.env.JWT_SECRET;
 io.use((socket, next) => {
     const token = socket.handshake.auth?.token || 
-                  socket.handshake.headers?.authorization?.replace(/^Bearer\s+/, '') || 
-                  socket.handshake.query?.token;
+                  socket.handshake.headers?.authorization?.replace(/^Bearer\s+/, '');
     if (!token) {
         return next(new Error('Authentication error: token required'));
     }
@@ -132,11 +136,17 @@ async function startServer() {
         console.log('🚀 Network Monitor Backend starting...');
         console.log('');
 
+        // 0. Startup configuration validation
+        validateConfig();
+
         // 1. Veritabanını oluştur/kontrol et
         await ensureDatabase();
 
         // 2. Migration'ları çalıştır
         await runMigrations();
+
+        // 2.1 Güvenli admin bootstrap kontrolü (schema migration tablosundan bağımsız)
+        await ensureBootstrapAdmin();
 
         // 3. Ping servisini başlat
         const pingService = new PingService(io);

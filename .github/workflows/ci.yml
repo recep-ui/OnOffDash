@@ -98,6 +98,8 @@ jobs:
           MSSQL_SA_PASSWORD: "StrongPassword123!"
           DB_NAME: "network_monitor"
           DB_USER: "sa"
+          DB_APP_USER: "onoffdash_app"
+          DB_APP_PASSWORD: "AppUserStrongPassword123!"
           PING_INTERVAL_SECONDS: 60
           HEARTBEAT_TIMEOUT_SECONDS: 90
           RETENTION_DAYS: 30

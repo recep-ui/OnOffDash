@@ -20,31 +20,20 @@ import IpamPanel from './IpamPanel';
 import PdfToolsDashboard from '../pages/pdf-tools/PdfToolsDashboard';
 import FileToolsDashboard from '../pages/file-tools/FileToolsDashboard';
 import ConfirmDialog from './ui/ConfirmDialog';
+import ForceChangePassword from './ForceChangePassword';
 
 export default function Dashboard() {
-  const { connected, on, off, socket } = useSocket();
-  return (
-    <NotificationProvider socket={socket}>
-      <DashboardContent connected={connected} on={on} off={off} socket={socket} />
-    </NotificationProvider>
-  );
-}
-
-function DashboardContent({ connected, on, off, socket }) {
-  const { showToast } = useNotification();
-  const [activeTab, setActiveTab] = useState('dashboard');
-  const [stats, setStats] = useState(null);
-  const [devices, setDevices] = useState([]);
-  const [printers, setPrinters] = useState([]);
-  const [departments, setDepartments] = useState([]);
-  const [loading, setLoading] = useState(true);
-
-  // Authentication State
-  const [token, setToken] = useState(localStorage.getItem('token') || null);
+  const [token, setToken] = useState(() => localStorage.getItem('token') || null);
   const [user, setUser] = useState(() => {
-    const saved = localStorage.getItem('user');
-    return saved ? JSON.parse(saved) : null;
+    try {
+      const saved = localStorage.getItem('user');
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
   });
+
+  const { connected, on, off, socket } = useSocket(token);
 
   const handleLogin = (newToken, newUser) => {
     localStorage.setItem('token', newToken);
@@ -59,6 +48,31 @@ function DashboardContent({ connected, on, off, socket }) {
     setToken(null);
     setUser(null);
   };
+
+  return (
+    <NotificationProvider socket={socket}>
+      <DashboardContent 
+        connected={connected} 
+        on={on} 
+        off={off} 
+        socket={socket}
+        token={token}
+        user={user}
+        onLogin={handleLogin}
+        onLogout={handleLogout}
+      />
+    </NotificationProvider>
+  );
+}
+
+function DashboardContent({ connected, on, off, socket, token, user, onLogin, onLogout }) {
+  const { showToast } = useNotification();
+  const [activeTab, setActiveTab] = useState('dashboard');
+  const [stats, setStats] = useState(null);
+  const [devices, setDevices] = useState([]);
+  const [printers, setPrinters] = useState([]);
+  const [departments, setDepartments] = useState([]);
+  const [loading, setLoading] = useState(true);
 
   // Filters for Device Table
   const [search, setSearch] = useState('');
@@ -311,7 +325,17 @@ function DashboardContent({ connected, on, off, socket }) {
   };
 
   if (!token) {
-    return <Login onLogin={handleLogin} />;
+    return <Login onLogin={onLogin} />;
+  }
+
+  if (user && user.must_change_password) {
+    return (
+      <ForceChangePassword 
+        token={token} 
+        onPasswordChanged={onLogin} 
+        onLogout={onLogout} 
+      />
+    );
   }
 
   return (
@@ -321,7 +345,7 @@ function DashboardContent({ connected, on, off, socket }) {
       socketConnected={connected}
       lastUpdate={stats?.lastScanTime}
       user={user}
-      onLogout={handleLogout}
+      onLogout={onLogout}
       stats={stats}
       devices={devices}
       printers={printers}

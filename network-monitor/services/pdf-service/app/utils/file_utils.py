@@ -23,7 +23,9 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 MAX_FILE_SIZE = int(os.getenv("MAX_FILE_SIZE_MB", "50")) * 1024 * 1024
 
-def generate_unique_filename(extension: str = "pdf") -> str:
+def generate_unique_filename(extension: str = "pdf", user_id: int | str = None) -> str:
+    if user_id is not None:
+        return f"u{user_id}_{uuid.uuid4()}.{extension}"
     return f"{uuid.uuid4()}.{extension}"
 
 async def save_upload_file(upload_file: UploadFile) -> str:

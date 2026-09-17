@@ -9,8 +9,10 @@ BLACKLISTED_EXTENSIONS = {
     '.js', '.vbe', '.wsf', '.hta', '.jar', '.sh', '.py', '.pl'
 }
 
-def generate_unique_filename(extension: str) -> str:
+def generate_unique_filename(extension: str, user_id: int | str = None) -> str:
     ext = extension.lstrip('.')
+    if user_id is not None:
+        return f"u{user_id}_{uuid.uuid4()}.{ext}"
     return f"{uuid.uuid4()}.{ext}"
 
 def is_safe_extension(filename: str, allowed_extensions: set[str] = None) -> bool:

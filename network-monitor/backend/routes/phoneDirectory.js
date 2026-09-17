@@ -9,8 +9,9 @@ const { sanitizeCellValue } = require('../utils/excelSanitizer');
 router.get('/', async (req, res) => {
     try {
         const { building, department, search } = req.query;
+        const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 1000, 1), 1000);
 
-        let query = 'SELECT * FROM phone_directory';
+        let query = `SELECT TOP (${limit}) * FROM phone_directory`;
         const conditions = [];
         const params = [];
         let paramIndex = 1;

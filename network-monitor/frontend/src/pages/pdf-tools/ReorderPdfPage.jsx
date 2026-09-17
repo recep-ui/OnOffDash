@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import FileDropzone from '../../components/pdf/FileDropzone';
 import { useNotification } from '../../components/NotificationProvider';
+import { downloadFileWithAuth } from '../../services/api';
 
 export default function ReorderPdfPage({ onBack }) {
   const { showToast } = useNotification();
@@ -134,13 +135,12 @@ export default function ReorderPdfPage({ onBack }) {
     }
   };
 
-  const triggerDownload = (url) => {
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `duzenlenmis_${file.name}`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+  const triggerDownload = async (url) => {
+    try {
+      await downloadFileWithAuth(url, `duzenlenmis_${file ? file.name : 'dokuman.pdf'}`);
+    } catch (err) {
+      showToast('error', '❌ İndirme Hatası', err.message || 'Dosya indirilemedi.');
+    }
   };
 
   return (

@@ -38,9 +38,9 @@ router.post('/login', loginLimiter, async (req, res) => {
             return res.status(401).json({ error: 'Hatalı kullanıcı adı veya şifre.' });
         }
 
-        // Token oluştur (12 saat geçerli)
+        // Token oluştur (12 saat geçerli, must_change_password claim'i dahil)
         const token = jwt.sign(
-            { id: user.id, username: user.username, role: user.role },
+            { id: user.id, username: user.username, role: user.role, must_change_password: Boolean(user.must_change_password) },
             JWT_SECRET,
             { expiresIn: '12h' }
         );
@@ -113,7 +113,23 @@ router.post('/change-password', authenticateToken, async (req, res) => {
             [newHash, req.user.id]
         );
 
-        res.json({ message: 'Şifreniz başarıyla güncellendi.' });
+        // Şifre güncellendikten sonra kısıtlaması kaldırılmış yeni bir token üret
+        const newToken = jwt.sign(
+            { id: user.id, username: user.username, role: user.role, must_change_password: false },
+            JWT_SECRET,
+            { expiresIn: '12h' }
+        );
+
+        res.json({ 
+            message: 'Şifreniz başarıyla güncellendi.',
+            token: newToken,
+            user: {
+                id: user.id,
+                username: user.username,
+                role: user.role,
+                must_change_password: false
+            }
+        });
     } catch (err) {
         console.error('Change password error:', err);
         res.status(500).json({ error: 'Şifre güncellenirken sunucu hatası oluştu.' });

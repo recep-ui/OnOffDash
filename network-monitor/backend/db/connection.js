@@ -1,12 +1,15 @@
 const sql = require('mssql');
 require('dotenv').config();
 
+const runtimeUser = process.env.DB_APP_USER || process.env.DB_USER || 'sa';
+const runtimePassword = process.env.DB_APP_PASSWORD || process.env.DB_PASSWORD;
+
 const config = {
     server: process.env.DB_HOST || 'localhost',
     port: parseInt(process.env.DB_PORT || '1433'),
     database: process.env.DB_NAME || 'network_monitor',
-    user: process.env.DB_USER || 'sa',
-    password: process.env.DB_PASSWORD ? String(process.env.DB_PASSWORD) : undefined,
+    user: runtimeUser,
+    password: runtimePassword ? String(runtimePassword) : undefined,
     options: {
         encrypt: process.env.DB_ENCRYPT === 'true',
         trustServerCertificate: process.env.DB_TRUST_SERVER_CERTIFICATE !== 'false',
@@ -20,8 +23,16 @@ const config = {
 };
 
 const adminConfig = {
-    ...config,
-    database: 'master'
+    server: process.env.DB_HOST || 'localhost',
+    port: parseInt(process.env.DB_PORT || '1433'),
+    database: 'master',
+    user: process.env.DB_ADMIN_USER || 'sa',
+    password: process.env.DB_ADMIN_PASSWORD || process.env.MSSQL_SA_PASSWORD || (process.env.DB_PASSWORD ? String(process.env.DB_PASSWORD) : undefined),
+    options: {
+        encrypt: process.env.DB_ENCRYPT === 'true',
+        trustServerCertificate: process.env.DB_TRUST_SERVER_CERTIFICATE !== 'false',
+        enableArithAbort: true
+    }
 };
 
 function maskParamsForLog(queryText, params) {
@@ -135,6 +146,9 @@ const pool = {
 };
 
 async function ensureDatabase() {
+    if (!adminConfig.password) {
+        return;
+    }
     const adminPool = new sql.ConnectionPool(adminConfig);
     try {
         await adminPool.connect();
@@ -154,11 +168,39 @@ async function ensureDatabase() {
         } else {
             console.log(`✅ Database "${dbName}" already exists.`);
         }
+
+        // Provision non-SA application user for least-privilege runtime access if configured
+        const appUser = process.env.DB_APP_USER;
+        const appPass = process.env.DB_APP_PASSWORD;
+        if (appUser && appPass && appUser.toLowerCase() !== 'sa') {
+            if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(appUser)) {
+                throw new Error(`Invalid application database user name: "${appUser}".`);
+            }
+            const loginReq = adminPool.request();
+            loginReq.input('appUser', sql.VarChar, appUser);
+            const loginRes = await loginReq.query(`SELECT 1 FROM sys.server_principals WHERE name = @appUser`);
+            if (loginRes.recordset.length === 0) {
+                const safePass = appPass.replace(/'/g, "''");
+                await adminPool.request().query(`CREATE LOGIN [${appUser}] WITH PASSWORD = '${safePass}', CHECK_POLICY = OFF`);
+                console.log(`✅ Application SQL login "${appUser}" created.`);
+            }
+
+            await adminPool.request().query(`
+                USE [${dbName}];
+                IF NOT EXISTS (SELECT 1 FROM sys.database_principals WHERE name = '${appUser}')
+                BEGIN
+                    CREATE USER [${appUser}] FOR LOGIN [${appUser}];
+                    ALTER ROLE db_datareader ADD MEMBER [${appUser}];
+                    ALTER ROLE db_datawriter ADD MEMBER [${appUser}];
+                    ALTER ROLE db_ddladmin ADD MEMBER [${appUser}];
+                END
+            `);
+            console.log(`✅ Scoped database user "${appUser}" provisioned on "${dbName}".`);
+        }
     } catch (err) {
-        console.error('❌ Error ensuring database:', err.message);
-        throw err;
+        console.warn('⚠️ Notice during database provisioning:', err.message);
     } finally {
-        await adminPool.close();
+        try { await adminPool.close(); } catch (_) {}
     }
 }
 

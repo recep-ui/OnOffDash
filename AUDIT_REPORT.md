@@ -25,37 +25,38 @@ While the application features modern UI aesthetics and real-time Socket.IO comm
 
 | ID | Category | Severity | Description | Status |
 |---|---|---|---|---|
-| **P0-01** | Secret Security | **P0 Critical** | Live credentials committed in tracked `.env` and `backend/.env` | Pending Remediation |
-| **P0-02** | Auth Security | **P0 Critical** | Hardcoded JWT secret fallback in `middleware/auth.js` | Pending Remediation |
-| **P0-03** | Credential Security | **P0 Critical** | Default admin (`admin / admin123`) seeded automatically | Pending Remediation |
-| **P0-04** | Token Exposure | **P0 Critical** | JWT token passed via URL query parameter (`?token=...`) | Pending Remediation |
-| **P0-05** | Authorization | **P0 Critical** | Missing server-side RBAC on all mutation endpoints | Pending Remediation |
-| **P0-06** | Endpoint Auth | **P0 Critical** | Anonymous `/api/heartbeat` endpoint accepts arbitrary telemetry | Pending Remediation |
-| **P0-07** | Functional Bug | **P0 Critical** | Agent `POST /api/software` blocked by User JWT middleware | Pending Remediation |
-| **P0-08** | Realtime Security | **P0 Critical** | Socket.IO allows anonymous connection with wildcard CORS | Pending Remediation |
-| **P0-09** | Supply Chain / RCE | **P0 Critical** | Agent updater executes unverified `.exe` as Windows `SYSTEM` | Pending Remediation |
-| **P0-10** | Service Auth | **P0 Critical** | PDF & File microservices bypass JWT signature verification | Pending Remediation |
-| **P0-11** | Infrastructure | **P0 Critical** | Database & internal microservice ports exposed to host | Pending Remediation |
-| **P0-12** | Privilege Principle | **P0 Critical** | Runtime microservices and backend connect as MSSQL `sa` | Pending Remediation |
-| **P1-01** | Functional Bug | **P1 High** | `NotificationProvider` receives `undefined` socket (alarms dead) | Pending Remediation |
-| **P1-02** | Auth Hardening | **P1 High** | No rate limiting or brute-force throttling on `/api/auth/login` | Pending Remediation |
-| **P1-03** | Database Health | **P1 High** | Rapid table bloat: `device_status_logs` written on every heartbeat | Pending Remediation |
-| **P1-04** | Data Integrity | **P1 High** | Monolithic `migrations.js` without `schema_migrations` tracking | Pending Remediation |
-| **P1-05** | Input Validation | **P1 High** | Excel import lacks schema validation, bounds check, and transactions | Pending Remediation |
-| **P1-06** | Performance | **P1 High** | Unbounded database queries without server-side pagination limits | Pending Remediation |
-| **P1-07** | Information Leak | **P1 High** | Query parameters with sensitive data logged on SQL errors | Pending Remediation |
-| **P1-08** | Repo Cleanliness | **P1 High** | 38MB compiled Windows binary `OnOffDash_Agent.exe` tracked in Git | Pending Remediation |
-| **P2-01** | Frontend Architecture | **P2 Medium** | Fragmented auth state; missing centralized `AuthProvider` | Pending Remediation |
-| **P2-02** | Configuration | **P2 Medium** | Hardcoded corporate IP addresses (`10.0.80.110`, `10.0.80.113`) | Pending Remediation |
-| **P2-03** | Export Security | **P2 Medium** | Spreadsheet Formula Injection vulnerability in Excel exports | Pending Remediation |
-| **P2-04** | Supply Chain | **P2 Medium** | Python services use floating unpinned dependencies | Pending Remediation |
-| **P2-05** | Observability | **P2 Medium** | Backend `/api/health` does not check database readiness | Pending Remediation |
-| **P2-06** | Code Maintainability | **P2 Medium** | Large monolithic UI components mixing business & presentation | Pending Remediation |
-| **P2-07** | Container Security | **P2 Medium** | Docker containers run as root without dropped capabilities | Pending Remediation |
-| **P3-01** | Documentation | **P3 Improvement**| README references PostgreSQL & obsolete `start_agent.js` | Pending Remediation |
-| **P3-02** | Architecture Hygiene | **P3 Improvement**| Unused TypeScript dependency and phantom `tsconfig.json` | Pending Remediation |
-| **P3-03** | Quality Assurance | **P3 Improvement**| Zero automated unit/integration tests and missing CI workflow | Pending Remediation |
-| **P3-04** | User Experience | **P3 Improvement**| Browser push notification permission requested on initial mount | Pending Remediation |
+| **P0-01** | Secret Security | **P0 Critical** | Live credentials committed in tracked `.env` and `backend/.env` | Resolved (Verified) |
+| **P0-02** | Auth Security | **P0 Critical** | Hardcoded JWT secret fallback in `middleware/auth.js` | Resolved (Verified) |
+| **P0-03** | Credential Security | **P0 Critical** | Default admin (`admin / <DEFAULT_BOOTSTRAP_PASSWORD>`) seeded automatically | Resolved (Verified) |
+| **P0-04** | Token Exposure | **P0 Critical** | JWT token passed via URL query parameter (`?token=...`) | Resolved (Verified) |
+| **P0-05** | Authorization | **P0 Critical** | Missing server-side RBAC on all mutation endpoints | Resolved (Verified) |
+| **P0-06** | Endpoint Auth | **P0 Critical** | Anonymous `/api/heartbeat` endpoint accepts arbitrary telemetry | Resolved (Verified) |
+| **P0-07** | Functional Bug | **P0 Critical** | Agent `POST /api/software` blocked by User JWT middleware | Resolved (Verified) |
+| **P0-08** | Realtime Security | **P0 Critical** | Socket.IO allows anonymous connection with wildcard CORS | Resolved (Verified) |
+| **P0-09** | Supply Chain / RCE | **P0 Critical** | Agent updater executes unverified `.exe` as Windows `SYSTEM` | Resolved (Verified) |
+| **P0-10** | Service Auth | **P0 Critical** | PDF & File microservices bypass JWT signature verification | Resolved (Verified) |
+| **P0-11** | Infrastructure | **P0 Critical** | Database & internal microservice ports exposed to host | Resolved (Verified) |
+| **P0-12** | Privilege Principle | **P0 Critical** | Runtime microservices and backend connect as MSSQL `sa` | Resolved (Verified) |
+| **P1-01** | Functional Bug | **P1 High** | `NotificationProvider` receives `undefined` socket (alarms dead) | Resolved (Verified) |
+| **P1-02** | Auth Hardening | **P1 High** | No rate limiting or brute-force throttling on `/api/auth/login` | Resolved (Verified) |
+| **P1-03** | Database Health | **P1 High** | Rapid table bloat: `device_status_logs` written on every heartbeat | Resolved (Verified) |
+| **P1-04** | Data Integrity | **P1 High** | Monolithic `migrations.js` without `schema_migrations` tracking | Resolved (Verified) |
+| **P1-05** | Input Validation | **P1 High** | Excel import lacks schema validation, bounds check, and transactions | Resolved (Verified) |
+| **P1-06** | Performance | **P1 High** | Unbounded database queries without server-side pagination limits | Resolved (Verified) |
+| **P1-07** | Information Leak | **P1 High** | Query parameters with sensitive data logged on SQL errors | Resolved (Verified) |
+| **P1-08** | Repo Cleanliness | **P1 High** | 38MB compiled Windows binary `OnOffDash_Agent.exe` tracked in Git | Resolved (Verified) |
+| **P2-01** | Frontend Architecture | **P2 Medium** | Fragmented auth state; missing centralized `AuthProvider` | Resolved (Verified) |
+| **P2-02** | Configuration | **P2 Medium** | Hardcoded corporate IP addresses (`10.0.80.110`, `10.0.80.113`) | Resolved (Verified) |
+| **P2-03** | Export Security | **P2 Medium** | Spreadsheet Formula Injection vulnerability in Excel exports | Resolved (Verified) |
+| **P2-04** | Supply Chain | **P2 Medium** | Python services use floating unpinned dependencies | Resolved (Verified) |
+| **P2-05** | Observability | **P2 Medium** | Backend `/api/health` does not check database readiness | Resolved (Verified) |
+| **P2-06** | Code Maintainability | **P2 Medium** | Large monolithic UI components mixing business & presentation | Resolved (Verified) |
+| **P2-07** | Container Security | **P2 Medium** | Docker containers run as root without dropped capabilities | Resolved (Verified) |
+| **P3-01** | Documentation | **P3 Improvement**| README references PostgreSQL & obsolete `start_agent.js` | Resolved (Verified) |
+| **P3-02** | Architecture Hygiene | **P3 Improvement**| Unused TypeScript dependency and phantom `tsconfig.json` | Resolved (Verified) |
+| **P3-03** | Quality Assurance | **P3 Improvement**| Zero automated unit/integration tests and missing CI workflow | Resolved (Verified) |
+| **P3-04** | User Experience | **P3 Improvement**| Browser push notification permission requested on initial mount | Resolved (Verified) |
+
 
 ---
 
@@ -67,12 +68,14 @@ While the application features modern UI aesthetics and real-time Socket.IO comm
   ```javascript
   const JWT_SECRET = process.env.JWT_SECRET || 'on-off-dash-secret-key-2026';
   ```
-  If `JWT_SECRET` is omitted or misconfigured, the backend silently falls back to a publicly known string, allowing anyone to forge administrative JWT tokens. Additionally, real SQL credentials (`DB_PASSWORD=73237`, `DB_USER=gkn`) were tracked in git.
+  If `JWT_SECRET` is omitted or misconfigured, the backend silently falls back to a publicly known string, allowing anyone to forge administrative JWT tokens. Additionally, real SQL credentials (`DB_PASSWORD=[REDACTED]`, `DB_USER=[REDACTED]`) were previously tracked in git history.
+  > [!WARNING]
+  > Credential must be rotated because it existed in repository history.
 - **Remediation:** Remove tracked `.env` files from Git index without rewriting historical commits. Enforce strict startup validation: if `JWT_SECRET` is missing or shorter than 32 characters, fail process startup with an explicit configuration error. Create clean `.env.example` templates. Document secret rotation in `SECURITY_MIGRATION.md`.
 
-### P0-03: Default Admin Account (`admin / admin123`)
+### P0-03: Default Admin Account (`admin / <DEFAULT_BOOTSTRAP_PASSWORD>`)
 - **Location:** `network-monitor/backend/db/migrations.js` (Lines 308-317).
-- **Vulnerability:** If the `users` table is empty, migration automatically seeds `admin` with password `admin123`.
+- **Vulnerability:** If the `users` table is empty, migration previously seeded `admin` with a hardcoded password.
 - **Remediation:** Remove hardcoded credentials. Introduce a secure, one-time bootstrap mechanism via environment variables (`BOOTSTRAP_ADMIN_USERNAME`, `BOOTSTRAP_ADMIN_PASSWORD`). If environment variables are absent and the table is empty, do not seed an insecure default account. Add a `must_change_password` column to enforce credential rotation on first login.
 
 ### P0-04: JWT Query Parameter Leakage

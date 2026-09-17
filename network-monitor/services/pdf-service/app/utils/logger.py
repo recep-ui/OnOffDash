@@ -24,28 +24,9 @@ if PDF_LOG_MODE == "jsonl":
 DB_HOST = os.getenv("DB_HOST", "localhost")
 DB_PORT = os.getenv("DB_PORT", "1433")
 DB_NAME = os.getenv("DB_NAME", "network_monitor")
-DB_USER = os.getenv("DB_USER", "sa")
+DB_USER = os.getenv("DB_USER", "app_user")
 DB_PASSWORD = os.getenv("DB_PASSWORD", "")
 
-# If running locally outside docker and we have backend's .env, we can parse it
-if DB_HOST == "localhost" and DB_PASSWORD == "":
-    backend_env_path = os.path.join(os.path.dirname(BASE_DIR), "backend", ".env")
-    if os.path.exists(backend_env_path):
-        try:
-            with open(backend_env_path, "r", encoding="utf-8") as env_f:
-                for line in env_f:
-                    if "=" in line:
-                        k, v = line.strip().split("=", 1)
-                        if k == "DB_USER":
-                            DB_USER = v
-                        elif k == "DB_PASSWORD":
-                            DB_PASSWORD = v
-                        elif k == "DB_NAME":
-                            DB_NAME = v
-                        elif k == "DB_PORT":
-                            DB_PORT = v
-        except Exception:
-            pass
 
 _db_initialized = False
 

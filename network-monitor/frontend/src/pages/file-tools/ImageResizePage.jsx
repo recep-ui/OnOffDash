@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import FileDropzone from '../../components/file-tools/FileDropzone';
 import { useNotification } from '../../components/NotificationProvider';
+import { downloadFileWithAuth } from '../../services/api';
 
 export default function ImageResizePage({ onBack }) {
   const { showToast } = useNotification();
@@ -76,14 +77,13 @@ export default function ImageResizePage({ onBack }) {
     }
   };
 
-  const triggerDownload = (url) => {
-    const ext = outputFormat.toLowerCase() === 'jpeg' ? 'jpg' : outputFormat.toLowerCase();
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `boyutlandirilmis_gorsel.${ext}`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+  const triggerDownload = async (url) => {
+    try {
+      const ext = outputFormat.toLowerCase() === 'jpeg' ? 'jpg' : outputFormat.toLowerCase();
+      await downloadFileWithAuth(url, `boyutlandirilmis_gorsel.${ext}`);
+    } catch (err) {
+      showToast('error', '❌ İndirme Hatası', err.message || 'Dosya indirilemedi.');
+    }
   };
 
   const formatSize = (bytes) => {

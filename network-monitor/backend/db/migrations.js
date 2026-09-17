@@ -324,36 +324,8 @@ async function runMigrations() {
             await recordMigration('006_phone_directory', 'Internal phone directory table and indices');
         }
 
-        // --- 007: Safe Admin Bootstrap (NO HARDCODED PASSWORDS) ---
-        if (!await isMigrationApplied('007_admin_bootstrap')) {
-            const usersCountRes = await client.query('SELECT COUNT(*) as count FROM users');
-            const totalUsers = parseInt(usersCountRes.rows[0].count);
-
-            if (totalUsers === 0) {
-                const bootstrapUser = process.env.BOOTSTRAP_ADMIN_USERNAME;
-                const bootstrapPass = process.env.BOOTSTRAP_ADMIN_PASSWORD;
-
-                if (bootstrapUser && bootstrapPass) {
-                    if (bootstrapPass.length < 8) {
-                        throw new Error('BOOTSTRAP_ADMIN_PASSWORD must be at least 8 characters long.');
-                    }
-                    const bcrypt = require('bcryptjs');
-                    const hash = await bcrypt.hash(bootstrapPass, 10);
-                    await client.query(`
-                        INSERT INTO users (username, password_hash, role, must_change_password)
-                        VALUES ($1, $2, 'admin', 1)
-                    `, [bootstrapUser.trim(), hash]);
-                    console.log(`👤 Bootstrap admin created: "${bootstrapUser}" (must change password on first login).`);
-                } else {
-                    console.warn('⚠️ WARNING: No users exist in database and no BOOTSTRAP_ADMIN credentials provided.');
-                    console.warn('Set BOOTSTRAP_ADMIN_USERNAME and BOOTSTRAP_ADMIN_PASSWORD to initialize admin.');
-                }
-            }
-            await recordMigration('007_admin_bootstrap', 'Bootstrap admin account without hardcoded credentials');
-        }
-
-        // --- 008: Composite Indices for High Performance & DB Growth Control ---
-        if (!await isMigrationApplied('008_performance_composite_indices')) {
+        // --- 007: Composite Indices for High Performance & DB Growth Control ---
+        if (!await isMigrationApplied('007_performance_composite_indices') && !await isMigrationApplied('008_performance_composite_indices')) {
             await client.query(`
                 IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_heartbeats_device_seen')
                     CREATE INDEX idx_heartbeats_device_seen ON heartbeats(device_id, last_seen DESC);
@@ -361,7 +333,7 @@ async function runMigrations() {
                 IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_status_logs_device_time')
                     CREATE INDEX idx_status_logs_device_time ON device_status_logs(device_id, checked_at DESC);
             `);
-            await recordMigration('008_performance_composite_indices', 'Composite indices for rapid telemetry queries');
+            await recordMigration('007_performance_composite_indices', 'Composite indices for rapid telemetry queries');
         }
 
         console.log('✅ All database schema migrations verified and up to date.');
@@ -373,4 +345,46 @@ async function runMigrations() {
     }
 }
 
-module.exports = { runMigrations };
+/**
+ * Standalone Bootstrap Admin Provisioner.
+ * Decoupled from schema migrations table so environment variables can be provided
+ * or updated on any restart when the users table is empty.
+ */
+async function ensureBootstrapAdmin() {
+    const client = await pool.connect();
+    try {
+        const usersCountRes = await client.query('SELECT COUNT(*) as count FROM users');
+        const totalUsers = parseInt(usersCountRes.rows[0].count);
+
+        if (totalUsers > 0) {
+            return; // Users already exist, nothing to do
+        }
+
+        const bootstrapUser = process.env.BOOTSTRAP_ADMIN_USERNAME;
+        const bootstrapPass = process.env.BOOTSTRAP_ADMIN_PASSWORD;
+
+        if (bootstrapUser && bootstrapPass) {
+            if (bootstrapPass.length < 8) {
+                console.error('❌ BOOTSTRAP_ADMIN_PASSWORD must be at least 8 characters long.');
+                return;
+            }
+            const bcrypt = require('bcryptjs');
+            const hash = await bcrypt.hash(bootstrapPass, 10);
+            await client.query(`
+                INSERT INTO users (username, password_hash, role, must_change_password)
+                VALUES ($1, $2, 'admin', 1)
+            `, [bootstrapUser.trim(), hash]);
+            console.log(`👤 Bootstrap admin created: "${bootstrapUser}" (must change password on first login).`);
+        } else {
+            console.warn('⚠️ WARNING: No users exist in database and no BOOTSTRAP_ADMIN credentials provided.');
+            console.warn('Set BOOTSTRAP_ADMIN_USERNAME and BOOTSTRAP_ADMIN_PASSWORD in environment to initialize admin.');
+        }
+    } catch (err) {
+        console.error('❌ Error during ensureBootstrapAdmin:', err.message);
+        throw err;
+    } finally {
+        client.release();
+    }
+}
+
+module.exports = { runMigrations, ensureBootstrapAdmin };

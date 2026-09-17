@@ -299,9 +299,10 @@ router.get('/', async (req, res) => {
     try {
         const { type, search } = req.query;
         const actionType = type || 'action';
+        const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 100, 1), 500);
 
         let query = `
-            SELECT a.*, d.hostname, d.ip_address 
+            SELECT TOP (${limit}) a.*, d.hostname, d.ip_address 
             FROM device_actions a 
             LEFT JOIN devices d ON a.device_id = d.id 
             WHERE a.action_type = $1
@@ -343,8 +344,9 @@ router.get('/', async (req, res) => {
 // GET /api/actions/:id — Bir cihazın yapılan işler ve malzeme geçmişini getir
 router.get('/:id', async (req, res) => {
     try {
+        const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 100, 1), 500);
         const result = await pool.query(
-            `SELECT * FROM device_actions WHERE device_id = $1 ORDER BY COALESCE(arrival_date, action_date) DESC, id DESC`,
+            `SELECT TOP (${limit}) * FROM device_actions WHERE device_id = $1 ORDER BY COALESCE(arrival_date, action_date) DESC, id DESC`,
             [req.params.id]
         );
         res.json(result.rows);

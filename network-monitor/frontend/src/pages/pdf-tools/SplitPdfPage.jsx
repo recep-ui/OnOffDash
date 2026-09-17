@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import FileDropzone from '../../components/pdf/FileDropzone';
 import { useNotification } from '../../components/NotificationProvider';
+import { downloadFileWithAuth } from '../../services/api';
 
 export default function SplitPdfPage({ onBack }) {
   const { showToast } = useNotification();
@@ -16,14 +17,13 @@ export default function SplitPdfPage({ onBack }) {
     }
   };
 
-  const handleSplit = async (e) => {
-    e.preventDefault();
+  const handleSplit = async () => {
     if (!file) {
-      showToast('error', '❌ Hata', 'Lütfen bölünecek bir PDF dosyası seçin.');
+      showToast('error', '❌ Hata', 'Lütfen bir PDF dosyası seçin.');
       return;
     }
     if (!rangeStr.trim()) {
-      showToast('error', '❌ Hata', 'Lütfen geçerli bir sayfa aralığı girin (Örn: 1-3, 5).');
+      showToast('error', '❌ Hata', 'Lütfen sayfa aralığı belirtin (örn: 1-3, 5).');
       return;
     }
 
@@ -32,7 +32,7 @@ export default function SplitPdfPage({ onBack }) {
 
     const formData = new FormData();
     formData.append('file', file);
-    formData.append('range_str', rangeStr);
+    formData.append('range_str', rangeStr.trim());
 
     const token = localStorage.getItem('token');
     const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
@@ -63,13 +63,12 @@ export default function SplitPdfPage({ onBack }) {
     }
   };
 
-  const triggerDownload = (url) => {
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `bolunmus_${file.name}`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+  const triggerDownload = async (url) => {
+    try {
+      await downloadFileWithAuth(url, `bolunmus_${file ? file.name : 'dokuman.pdf'}`);
+    } catch (err) {
+      showToast('error', '❌ İndirme Hatası', err.message || 'Dosya indirilemedi.');
+    }
   };
 
   return (

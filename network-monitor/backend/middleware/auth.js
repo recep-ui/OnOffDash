@@ -3,10 +3,9 @@ const jwt = require('jsonwebtoken');
 // Validate JWT_SECRET on module load — never allow silent fallback in production
 const JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET || typeof JWT_SECRET !== 'string' || JWT_SECRET.trim().length < 32) {
-    console.error('FATAL CONFIGURATION ERROR: JWT_SECRET environment variable is missing or shorter than 32 characters.');
-    console.error('Set a secure JWT_SECRET in your .env file before starting the application.');
-    // In test or non-production environments where tests might import before env is loaded, throw or exit
-    if (process.env.NODE_ENV !== 'test') {
+    if (process.env.NODE_ENV === 'production' && !process.env.npm_lifecycle_event?.includes('test')) {
+        console.error('FATAL CONFIGURATION ERROR: JWT_SECRET environment variable is missing or shorter than 32 characters.');
+        console.error('Set a secure JWT_SECRET in your .env file before starting the application.');
         process.exit(1);
     }
 }
@@ -35,6 +34,21 @@ function authenticateToken(req, res, next) {
             return res.status(403).json({ error: 'Geçersiz veya süresi dolmuş oturum anahtarı.' });
         }
         req.user = user;
+
+        // Enforce password change restriction: only /api/auth/me and /api/auth/change-password allowed
+        if (user.must_change_password) {
+            const requestPath = req.originalUrl ? req.originalUrl.split('?')[0] : ((req.baseUrl || '') + (req.path || ''));
+            const allowedPaths = ['/api/auth/me', '/api/auth/change-password'];
+            const isAllowed = allowedPaths.some(p => requestPath === p || requestPath.endsWith(p));
+            if (!isAllowed) {
+                return res.status(403).json({
+                    error: 'Parola değişimi zorunludur. Lütfen önce şifrenizi güncelleyiniz.',
+                    code: 'PASSWORD_CHANGE_REQUIRED',
+                    must_change_password: true
+                });
+            }
+        }
+
         next();
     });
 }

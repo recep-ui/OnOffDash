@@ -3,9 +3,12 @@
 ## 1. Overview & Immediate Warning
 
 During the security audit, it was determined that previous repository commits contained live or hardcoded credentials:
-- **MSSQL Database Passwords** (Previously committed `sa` password and local `gkn` account password).
-- **JWT Signing Secret** (Previously committed default key `on-off-dash-secret-key-2026`).
-- **Default Administrative Credentials** (`admin` / `admin123` hardcoded in migrations).
+- **MSSQL Database Passwords** (Previously committed database credentials in legacy commits).
+- **JWT Signing Secret** (Previously committed default signing keys).
+- **Default Administrative Credentials** (Previously committed default setup credentials).
+
+> [!WARNING]
+> Credential must be rotated because it existed in repository history. All legacy credentials must be considered compromised.
 
 All `.env` files have now been permanently removed from Git tracking and added to `.gitignore`. **However, because Git commit history was preserved (to prevent breaking clones and remote tracking), any credentials that existed in previous commits MUST be rotated immediately in all staging and production environments.**
 
@@ -46,7 +49,7 @@ All `.env` files have now been permanently removed from Git tracking and added t
 3. **Impact:** Agents without the matching `AGENT_API_KEY` will receive HTTP 401 on `/api/heartbeat` and `/api/software`.
 
 ### D. Rotate Existing User Passwords
-1. Any user accounts created with default `admin123` passwords must be updated immediately via the UI profile / user management or SQL:
+1. Any user accounts created with default bootstrap passwords must be updated immediately via the UI profile / user management or SQL:
    ```sql
    -- Password change should be performed through the application's bcrypt hash
    ```
@@ -61,4 +64,4 @@ All `.env` files have now been permanently removed from Git tracking and added t
 - [ ] New SQL passwords are in effect on the database server.
 - [ ] New `JWT_SECRET` is applied across backend and Python microservices.
 - [ ] `AGENT_API_KEY` is distributed to Windows endpoints.
-- [ ] Default `admin123` password is changed.
+- [ ] Default bootstrap password is changed.

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import FileDropzone from '../../components/pdf/FileDropzone';
 import { useNotification } from '../../components/NotificationProvider';
+import { downloadFileWithAuth } from '../../services/api';
 
 export default function MergePdfPage({ onBack }) {
   const { showToast } = useNotification();
@@ -34,7 +35,7 @@ export default function MergePdfPage({ onBack }) {
 
   const handleMerge = async () => {
     if (files.length < 2) {
-      showToast('error', '❌ Hata', 'Birleştirmek için en az 2 PDF dosyası seçmelisiniz.');
+      showToast('warning', '⚠️ Uyarı', 'Lütfen en az 2 PDF dosyası seçin.');
       return;
     }
 
@@ -42,31 +43,26 @@ export default function MergePdfPage({ onBack }) {
     setDownloadUrl(null);
 
     const formData = new FormData();
-    files.forEach(file => {
-      formData.append('files', file);
-    });
-
-    const token = localStorage.getItem('token');
-    const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
+    files.forEach(f => formData.append('files', f));
 
     try {
       const response = await fetch('/api/pdf/merge', {
         method: 'POST',
-        headers: headers,
-        body: formData
+        headers: {
+          ...(localStorage.getItem('token') ? { 'Authorization': `Bearer ${localStorage.getItem('token')}` } : {})
+        },
+        body: formData,
       });
 
       if (!response.ok) {
-        const errData = await response.json();
+        const errData = await response.json().catch(() => ({}));
         throw new Error(errData.detail || 'Birleştirme işlemi başarısız oldu.');
       }
 
       const result = await response.json();
       if (result.success && result.download_url) {
         setDownloadUrl(result.download_url);
-        showToast('success', '✅ Birleştirme Başarılı', 'PDF dosyaları başarıyla birleştirildi.');
-        
-        // Auto trigger download
+        showToast('success', '✅ Başarılı', 'PDF dosyaları başarıyla birleştirildi.');
         triggerDownload(result.download_url);
       }
     } catch (err) {
@@ -77,13 +73,12 @@ export default function MergePdfPage({ onBack }) {
     }
   };
 
-  const triggerDownload = (url) => {
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = 'birlesmis_dokuman.pdf';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+  const triggerDownload = async (url) => {
+    try {
+      await downloadFileWithAuth(url, 'birlesmis_dokuman.pdf');
+    } catch (err) {
+      showToast('error', '❌ İndirme Hatası', err.message || 'Dosya indirilemedi.');
+    }
   };
 
   return (
