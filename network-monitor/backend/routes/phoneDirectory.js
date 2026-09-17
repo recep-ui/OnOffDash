@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const { pool } = require('../db/connection');
 const xlsx = require('xlsx');
+const { requireRole } = require('../middleware/auth');
+const { sanitizeCellValue } = require('../utils/excelSanitizer');
 
 // GET /api/phone-directory - Tüm rehberi listele
 router.get('/', async (req, res) => {
@@ -90,7 +92,7 @@ router.get('/export', async (req, res) => {
 
                 // Departmansız genel kayıtları en üste yaz
                 for (const entry of generalEntries) {
-                    sheetRows.push([entry.extension || '', entry.name || '', entry.job_title || '']);
+                    sheetRows.push([sanitizeCellValue(entry.extension), sanitizeCellValue(entry.name), sanitizeCellValue(entry.job_title)]);
                 }
 
                 // Her departman grubu için başlık ve kayıtları ekle
@@ -98,11 +100,11 @@ router.get('/export', async (req, res) => {
                     if (sheetRows.length > 1) {
                         sheetRows.push(['', '', '']); // Boş satır
                     }
-                    sheetRows.push(['', dept, '']); // Departman Başlığı (Sarı satıra denk gelen)
+                    sheetRows.push(['', sanitizeCellValue(dept), '']); // Departman Başlığı (Sarı satıra denk gelen)
                     sheetRows.push(['DAHİLİ', 'İSİM SOY İSİM', 'GÖREV TANIMI']); // Sütun Başlığı
                     
                     for (const entry of depts[dept]) {
-                        sheetRows.push([entry.extension || '', entry.name || '', entry.job_title || '']);
+                        sheetRows.push([sanitizeCellValue(entry.extension), sanitizeCellValue(entry.name), sanitizeCellValue(entry.job_title)]);
                     }
                 }
 
@@ -123,12 +125,8 @@ router.get('/export', async (req, res) => {
 });
 
 // POST /api/phone-directory - Yeni kayıt ekle
-router.post('/', async (req, res) => {
+router.post('/', requireRole('operator'), async (req, res) => {
     try {
-        if (req.user.role === 'viewer') {
-            return res.status(403).json({ error: 'Bu işlem için yetkiniz bulunmamaktadır.' });
-        }
-
         const { building, department, extension, name, job_title } = req.body;
         if (!building || !name) {
             return res.status(400).json({ error: 'Bina ve isim alanları zorunludur.' });
@@ -148,12 +146,8 @@ router.post('/', async (req, res) => {
 });
 
 // PUT /api/phone-directory/:id - Kayıt güncelle
-router.put('/:id', async (req, res) => {
+router.put('/:id', requireRole('operator'), async (req, res) => {
     try {
-        if (req.user.role === 'viewer') {
-            return res.status(403).json({ error: 'Bu işlem için yetkiniz bulunmamaktadır.' });
-        }
-
         const { id } = req.params;
         const { building, department, extension, name, job_title } = req.body;
 
@@ -176,12 +170,8 @@ router.put('/:id', async (req, res) => {
 });
 
 // DELETE /api/phone-directory/:id - Kayıt sil
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', requireRole('admin'), async (req, res) => {
     try {
-        if (req.user.role === 'viewer') {
-            return res.status(403).json({ error: 'Bu işlem için yetkiniz bulunmamaktadır.' });
-        }
-
         const { id } = req.params;
         const query = 'DELETE FROM phone_directory WHERE id = $1';
         await pool.query(query, [id]);
@@ -194,16 +184,15 @@ router.delete('/:id', async (req, res) => {
 });
 
 // POST /api/phone-directory/import - Excel rehberini aktar
-router.post('/import', async (req, res) => {
+router.post('/import', requireRole('operator'), async (req, res) => {
     const client = await pool.connect();
     try {
-        if (req.user.role === 'viewer') {
-            return res.status(403).json({ error: 'Bu işlem için yetkiniz bulunmamaktadır.' });
-        }
-
         const { fileData } = req.body;
         if (!fileData) {
             return res.status(400).json({ error: 'fileData (Base64) gereklidir.' });
+        }
+        if (typeof fileData !== 'string' || fileData.length > 14 * 1024 * 1024) {
+            return res.status(413).json({ error: 'Dosya boyutu çok büyük (Maksimum 10MB).' });
         }
 
         const buffer = Buffer.from(fileData, 'base64');

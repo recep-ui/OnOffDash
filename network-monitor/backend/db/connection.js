@@ -8,8 +8,8 @@ const config = {
     user: process.env.DB_USER || 'sa',
     password: process.env.DB_PASSWORD ? String(process.env.DB_PASSWORD) : undefined,
     options: {
-        encrypt: false, // For local dev
-        trustServerCertificate: true,
+        encrypt: process.env.DB_ENCRYPT === 'true',
+        trustServerCertificate: process.env.DB_TRUST_SERVER_CERTIFICATE !== 'false',
         enableArithAbort: true
     },
     pool: {
@@ -23,6 +23,15 @@ const adminConfig = {
     ...config,
     database: 'master'
 };
+
+function maskParamsForLog(queryText, params) {
+    if (!Array.isArray(params)) return params;
+    const lower = String(queryText).toLowerCase();
+    if (lower.includes('password') || lower.includes('token') || lower.includes('secret') || lower.includes('key')) {
+        return params.map(p => typeof p === 'string' ? '***REDACTED***' : p);
+    }
+    return params;
+}
 
 let connectionPool = null;
 
@@ -85,7 +94,7 @@ const pool = {
                     };
                 } catch (error) {
                     console.error('SQL Error on query:', mssqlText);
-                    console.error('With params:', params);
+                    console.error('With params:', maskParamsForLog(mssqlText, params));
                     throw error;
                 }
             },
@@ -119,7 +128,7 @@ const pool = {
             };
         } catch (error) {
             console.error('SQL Error on query:', mssqlText);
-            console.error('With params:', params);
+            console.error('With params:', maskParamsForLog(mssqlText, params));
             throw error;
         }
     }
@@ -153,4 +162,13 @@ async function ensureDatabase() {
     }
 }
 
-module.exports = { pool, ensureDatabase, sql };
+module.exports = { 
+    pool, 
+    ensureDatabase, 
+    sql, 
+    getConnection,
+    get poolPromise() {
+        return getConnection();
+    }
+};
+

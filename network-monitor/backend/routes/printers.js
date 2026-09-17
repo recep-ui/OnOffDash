@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const { pool } = require('../db/connection');
 const xlsx = require('xlsx');
+const { requireRole } = require('../middleware/auth');
+const { sanitizeRows } = require('../utils/excelSanitizer');
 
 // Helper to normalize keys
 function getNormalizedRow(row) {
@@ -64,7 +66,7 @@ router.get('/export', async (req, res) => {
             'SeriNo': p.serial_no || '',
             'Toner': p.toner_model || ''
         }));
-        const ws = xlsx.utils.json_to_sheet(excelRows);
+        const ws = xlsx.utils.json_to_sheet(sanitizeRows(excelRows));
         const wb = xlsx.utils.book_new();
         xlsx.utils.book_append_sheet(wb, ws, "Yazıcı Listesi");
         const buf = xlsx.write(wb, { type: 'buffer', bookType: 'xlsx' });
@@ -78,12 +80,15 @@ router.get('/export', async (req, res) => {
 });
 
 // POST /api/printers/import
-router.post('/import', async (req, res) => {
+router.post('/import', requireRole('operator'), async (req, res) => {
     const client = await pool.connect();
     try {
         const { fileData } = req.body;
         if (!fileData) {
             return res.status(400).json({ error: 'fileData (Base64) gereklidir.' });
+        }
+        if (typeof fileData !== 'string' || fileData.length > 14 * 1024 * 1024) {
+            return res.status(413).json({ error: 'Dosya boyutu çok büyük (Maksimum 10MB).' });
         }
         const buffer = Buffer.from(fileData, 'base64');
         const workbook = xlsx.read(buffer, { type: 'buffer' });
@@ -159,7 +164,7 @@ router.get('/toners/stock/export', async (req, res) => {
             'TonerAdı': s.toner_model || '',
             'Adet': s.quantity || 0
         }));
-        const ws = xlsx.utils.json_to_sheet(excelRows);
+        const ws = xlsx.utils.json_to_sheet(sanitizeRows(excelRows));
         const wb = xlsx.utils.book_new();
         xlsx.utils.book_append_sheet(wb, ws, "Toner Stokları");
         const buf = xlsx.write(wb, { type: 'buffer', bookType: 'xlsx' });
@@ -173,12 +178,15 @@ router.get('/toners/stock/export', async (req, res) => {
 });
 
 // POST /api/printers/toners/stock/import
-router.post('/toners/stock/import', async (req, res) => {
+router.post('/toners/stock/import', requireRole('operator'), async (req, res) => {
     const client = await pool.connect();
     try {
         const { fileData } = req.body;
         if (!fileData) {
             return res.status(400).json({ error: 'fileData (Base64) gereklidir.' });
+        }
+        if (typeof fileData !== 'string' || fileData.length > 14 * 1024 * 1024) {
+            return res.status(413).json({ error: 'Dosya boyutu çok büyük (Maksimum 10MB).' });
         }
         const buffer = Buffer.from(fileData, 'base64');
         const workbook = xlsx.read(buffer, { type: 'buffer' });
@@ -227,7 +235,7 @@ router.get('/toners/replacements/export', async (req, res) => {
             'Kullanıcı / Personel': r.username || '',
             'Toner Modeli': r.toner_model || ''
         }));
-        const ws = xlsx.utils.json_to_sheet(excelRows);
+        const ws = xlsx.utils.json_to_sheet(sanitizeRows(excelRows));
         const wb = xlsx.utils.book_new();
         xlsx.utils.book_append_sheet(wb, ws, "Toner Değişim Geçmişi");
         const buf = xlsx.write(wb, { type: 'buffer', bookType: 'xlsx' });
@@ -241,12 +249,15 @@ router.get('/toners/replacements/export', async (req, res) => {
 });
 
 // POST /api/printers/toners/replacements/import
-router.post('/toners/replacements/import', async (req, res) => {
+router.post('/toners/replacements/import', requireRole('operator'), async (req, res) => {
     const client = await pool.connect();
     try {
         const { fileData } = req.body;
         if (!fileData) {
             return res.status(400).json({ error: 'fileData (Base64) gereklidir.' });
+        }
+        if (typeof fileData !== 'string' || fileData.length > 14 * 1024 * 1024) {
+            return res.status(413).json({ error: 'Dosya boyutu çok büyük (Maksimum 10MB).' });
         }
         const buffer = Buffer.from(fileData, 'base64');
         const workbook = xlsx.read(buffer, { type: 'buffer' });
@@ -362,7 +373,7 @@ router.get('/:id', async (req, res) => {
 });
 
 // POST /api/printers — Yazıcı ekle
-router.post('/', async (req, res) => {
+router.post('/', requireRole('operator'), async (req, res) => {
     try {
         const { name, ip_address, model, location, department, description, print_type, serial_no, toner_model, toners } = req.body;
 
@@ -426,7 +437,7 @@ router.post('/', async (req, res) => {
 });
 
 // PUT /api/printers/:id — Yazıcı güncelle
-router.put('/:id', async (req, res) => {
+router.put('/:id', requireRole('operator'), async (req, res) => {
     try {
         const { 
             name, ip_address, model, is_online, error_message, has_paper_jam, 
@@ -501,7 +512,7 @@ router.put('/:id', async (req, res) => {
 });
 
 // DELETE /api/printers/:id
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', requireRole('admin'), async (req, res) => {
     try {
         const result = await pool.query('DELETE FROM printers OUTPUT DELETED.id WHERE id = $1', [req.params.id]);
         if (result.rows.length === 0) {
@@ -532,7 +543,7 @@ router.get('/:id/jamlogs', async (req, res) => {
 });
 
 // POST /api/printers/toners/stock — Yeni toner stok modeli ekle
-router.post('/toners/stock', async (req, res) => {
+router.post('/toners/stock', requireRole('operator'), async (req, res) => {
     try {
         const { toner_model, quantity } = req.body;
         if (!toner_model) {
@@ -556,7 +567,7 @@ router.post('/toners/stock', async (req, res) => {
 });
 
 // PUT /api/printers/toners/stock/:model — Toner stok modelini güncelle
-router.put('/toners/stock/:model', async (req, res) => {
+router.put('/toners/stock/:model', requireRole('operator'), async (req, res) => {
     try {
         const { new_model, quantity } = req.body;
         const modelParam = req.params.model;
@@ -578,7 +589,7 @@ router.put('/toners/stock/:model', async (req, res) => {
 });
 
 // DELETE /api/printers/toners/stock/:model — Toner stok modelini sil
-router.delete('/toners/stock/:model', async (req, res) => {
+router.delete('/toners/stock/:model', requireRole('admin'), async (req, res) => {
     try {
         const result = await pool.query(
             `DELETE FROM toner_stock OUTPUT DELETED.* WHERE toner_model = $1`,
@@ -595,7 +606,7 @@ router.delete('/toners/stock/:model', async (req, res) => {
 });
 
 // POST /api/printers/toners/replacements — Yeni toner değişim kaydı ekle
-router.post('/toners/replacements', async (req, res) => {
+router.post('/toners/replacements', requireRole('operator'), async (req, res) => {
     try {
         const { replacement_date, username, toner_model } = req.body;
         if (!toner_model) {
@@ -616,7 +627,7 @@ router.post('/toners/replacements', async (req, res) => {
 });
 
 // PUT /api/printers/toners/replacements/:id — Toner değişim kaydını güncelle
-router.put('/toners/replacements/:id', async (req, res) => {
+router.put('/toners/replacements/:id', requireRole('operator'), async (req, res) => {
     try {
         const { replacement_date, username, toner_model } = req.body;
         const repDate = replacement_date ? new Date(replacement_date) : new Date();
@@ -635,7 +646,7 @@ router.put('/toners/replacements/:id', async (req, res) => {
 });
 
 // DELETE /api/printers/toners/replacements/:id — Toner değişim kaydını sil
-router.delete('/toners/replacements/:id', async (req, res) => {
+router.delete('/toners/replacements/:id', requireRole('admin'), async (req, res) => {
     try {
         const result = await pool.query(
             `DELETE FROM toner_replacements OUTPUT DELETED.* WHERE id = $1`,
@@ -652,7 +663,7 @@ router.delete('/toners/replacements/:id', async (req, res) => {
 });
 
 // POST /api/printers/scan — SNMP ve Web ile yazıcıları tarama tetikle
-router.post('/scan', async (req, res) => {
+router.post('/scan', requireRole('operator'), async (req, res) => {
     try {
         const app = req.app;
         const io = app.get('io');

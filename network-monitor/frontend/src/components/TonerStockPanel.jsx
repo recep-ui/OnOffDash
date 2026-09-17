@@ -13,7 +13,7 @@ import {
   Download
 } from 'lucide-react';
 import { useNotification } from './NotificationProvider';
-import { fetchWithAuth, importTonerStockExcel, importTonerReplacementsExcel } from '../services/api';
+import { fetchWithAuth, importTonerStockExcel, importTonerReplacementsExcel, downloadFileWithAuth } from '../services/api';
 import Button from './ui/Button';
 import Modal from './ui/Modal';
 import ConfirmDialog from './ui/ConfirmDialog';
@@ -102,9 +102,13 @@ export default function TonerStockPanel({ role }) {
   const lowStockCount = stock.filter(item => (parseInt(item.quantity) || 0) <= 2).length;
 
   // Stock Actions
-  const handleExportStock = () => {
-    const token = localStorage.getItem('token');
-    window.open(`/api/printers/toners/stock/export?token=${token}`, '_blank');
+  const handleExportStock = async () => {
+    try {
+      await downloadFileWithAuth('/api/printers/toners/stock/export', 'Toner_Stoklari_Export.xlsx');
+      showToast('success', '✅ İndirme Başarılı', 'Toner stok Excel dosyası indirildi.');
+    } catch (err) {
+      showToast('error', '❌ Hata', err.message || 'Excel dışa aktarma başarısız.');
+    }
   };
 
   const handleImportStock = (e) => {
@@ -126,9 +130,13 @@ export default function TonerStockPanel({ role }) {
     e.target.value = '';
   };
 
-  const handleExportReplacements = () => {
-    const token = localStorage.getItem('token');
-    window.open(`/api/printers/toners/replacements/export?token=${token}`, '_blank');
+  const handleExportReplacements = async () => {
+    try {
+      await downloadFileWithAuth('/api/printers/toners/replacements/export', 'Toner_Degisim_Gecmisi_Export.xlsx');
+      showToast('success', '✅ İndirme Başarılı', 'Toner değişim geçmişi Excel dosyası indirildi.');
+    } catch (err) {
+      showToast('error', '❌ Hata', err.message || 'Excel dışa aktarma başarısız.');
+    }
   };
 
   const handleImportReplacements = (e) => {

@@ -254,3 +254,47 @@ export async function suggestNextIp(subnet = '') {
   if (!res.ok) throw new Error('IP önerisi alınamadı.');
   return res.json();
 }
+
+/**
+ * Downloads a file from an authenticated endpoint using Bearer token without exposing the token in query strings or URL history.
+ * @param {string} url - Target URL to fetch
+ * @param {string} defaultFilename - Fallback filename if Content-Disposition header is missing
+ */
+export async function downloadFileWithAuth(url, defaultFilename = 'download.xlsx') {
+  const token = localStorage.getItem('token');
+  const response = await fetch(url, {
+    method: 'GET',
+    headers: {
+      ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+    }
+  });
+
+  if (!response.ok) {
+    let errorMsg = 'Dosya indirilemedi';
+    try {
+      const errJson = await response.json();
+      errorMsg = errJson.error || errorMsg;
+    } catch (_) {}
+    throw new Error(errorMsg);
+  }
+
+  const disposition = response.headers.get('Content-Disposition');
+  let filename = defaultFilename;
+  if (disposition && disposition.includes('filename=')) {
+    const match = disposition.match(/filename="?([^";]+)"?/);
+    if (match && match[1]) {
+      filename = match[1].trim();
+    }
+  }
+
+  const blob = await response.blob();
+  const blobUrl = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = blobUrl;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  setTimeout(() => window.URL.revokeObjectURL(blobUrl), 1000);
+}
+

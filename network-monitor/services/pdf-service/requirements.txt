@@ -5,3 +5,5 @@ pypdf>=3.10.0
 pymupdf>=1.22.0
 pillow>=9.5.0
 pymssql>=2.3.0
+pyjwt>=2.8.0
+cryptography>=41.0.0

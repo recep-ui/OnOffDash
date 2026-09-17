@@ -2,11 +2,23 @@ const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const rateLimit = require('express-rate-limit');
 const { pool } = require('../db/connection');
 const { authenticateToken, requireRole, JWT_SECRET } = require('../middleware/auth');
 
-// POST /api/auth/login — Giriş Yap
-router.post('/login', async (req, res) => {
+// Rate limiting on login: max 10 attempts per 15 minutes per IP
+const loginLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 10,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Çok fazla giriş denemesi. Lütfen 15 dakika sonra tekrar deneyiniz.' }
+});
+
+const ALLOWED_ROLES = ['admin', 'operator', 'viewer'];
+
+// POST /api/auth/login — Giriş Yap (Brute-force protected)
+router.post('/login', loginLimiter, async (req, res) => {
     const { username, password } = req.body;
     if (!username || !password) {
         return res.status(400).json({ error: 'Kullanıcı adı ve şifre gereklidir.' });
@@ -16,6 +28,7 @@ router.post('/login', async (req, res) => {
         const result = await pool.query('SELECT * FROM users WHERE username = $1', [username.trim()]);
         const user = result.rows[0];
 
+        // Generic error message to prevent username enumeration
         if (!user) {
             return res.status(401).json({ error: 'Hatalı kullanıcı adı veya şifre.' });
         }
@@ -37,7 +50,8 @@ router.post('/login', async (req, res) => {
             user: {
                 id: user.id,
                 username: user.username,
-                role: user.role
+                role: user.role,
+                must_change_password: Boolean(user.must_change_password)
             }
         });
     } catch (err) {
@@ -49,23 +63,70 @@ router.post('/login', async (req, res) => {
 // GET /api/auth/me — Mevcut kullanıcı oturumu
 router.get('/me', authenticateToken, async (req, res) => {
     try {
-        const result = await pool.query('SELECT id, username, role, created_at FROM users WHERE id = $1', [req.user.id]);
+        const result = await pool.query(
+            'SELECT id, username, role, must_change_password, created_at FROM users WHERE id = $1',
+            [req.user.id]
+        );
         const user = result.rows[0];
         if (!user) {
             return res.status(404).json({ error: 'Kullanıcı bulunamadı.' });
         }
-        res.json({ user });
+        res.json({
+            user: {
+                ...user,
+                must_change_password: Boolean(user.must_change_password)
+            }
+        });
     } catch (err) {
         console.error('Get me error:', err);
         res.status(500).json({ error: 'Sunucu hatası.' });
     }
 });
 
+// POST /api/auth/change-password — Kullanıcının kendi şifresini değiştirmesi
+router.post('/change-password', authenticateToken, async (req, res) => {
+    const { oldPassword, newPassword } = req.body;
+
+    if (!oldPassword || !newPassword) {
+        return res.status(400).json({ error: 'Eski şifre ve yeni şifre alanları zorunludur.' });
+    }
+
+    if (typeof newPassword !== 'string' || newPassword.length < 8) {
+        return res.status(400).json({ error: 'Yeni şifre en az 8 karakter uzunluğunda olmalıdır.' });
+    }
+
+    try {
+        const result = await pool.query('SELECT * FROM users WHERE id = $1', [req.user.id]);
+        const user = result.rows[0];
+        if (!user) {
+            return res.status(404).json({ error: 'Kullanıcı bulunamadı.' });
+        }
+
+        const validOldPassword = await bcrypt.compare(oldPassword, user.password_hash);
+        if (!validOldPassword) {
+            return res.status(401).json({ error: 'Mevcut şifreniz hatalı.' });
+        }
+
+        const newHash = await bcrypt.hash(newPassword, 10);
+        await pool.query(
+            'UPDATE users SET password_hash = $1, must_change_password = 0, updated_at = GETDATE() WHERE id = $2',
+            [newHash, req.user.id]
+        );
+
+        res.json({ message: 'Şifreniz başarıyla güncellendi.' });
+    } catch (err) {
+        console.error('Change password error:', err);
+        res.status(500).json({ error: 'Şifre güncellenirken sunucu hatası oluştu.' });
+    }
+});
+
 // GET /api/auth/users — Tüm kullanıcıları listele (Admin yetkisi gerekir)
 router.get('/users', authenticateToken, requireRole('admin'), async (req, res) => {
     try {
-        const result = await pool.query('SELECT id, username, role, created_at FROM users ORDER BY username');
-        res.json(result.rows);
+        const result = await pool.query(
+            'SELECT id, username, role, must_change_password, created_at, updated_at FROM users ORDER BY username'
+        );
+        res.json(result.rows.map(u => ({ ...u, must_change_password: Boolean(u.must_change_password) })));
     } catch (err) {
         console.error('Get users error:', err);
         res.status(500).json({ error: 'Kullanıcı listesi alınamadı.' });
@@ -79,6 +140,14 @@ router.post('/users', authenticateToken, requireRole('admin'), async (req, res) 
         return res.status(400).json({ error: 'Kullanıcı adı, şifre ve rol alanları zorunludur.' });
     }
 
+    if (!ALLOWED_ROLES.includes(role.toLowerCase())) {
+        return res.status(400).json({ error: `Geçersiz rol. İzin verilen roller: ${ALLOWED_ROLES.join(', ')}` });
+    }
+
+    if (typeof password !== 'string' || password.length < 8) {
+        return res.status(400).json({ error: 'Şifre en az 8 karakter uzunluğunda olmalıdır.' });
+    }
+
     try {
         const checkUser = await pool.query('SELECT * FROM users WHERE username = $1', [username.trim()]);
         if (checkUser.rows.length > 0) {
@@ -87,13 +156,16 @@ router.post('/users', authenticateToken, requireRole('admin'), async (req, res) 
 
         const passwordHash = await bcrypt.hash(password, 10);
         const result = await pool.query(
-            `INSERT INTO users (username, password_hash, role)
-             OUTPUT INSERTED.id, INSERTED.username, INSERTED.role, INSERTED.created_at
-             VALUES ($1, $2, $3)`,
-            [username.trim(), passwordHash, role]
+            `INSERT INTO users (username, password_hash, role, must_change_password)
+             OUTPUT INSERTED.id, INSERTED.username, INSERTED.role, INSERTED.must_change_password, INSERTED.created_at
+             VALUES ($1, $2, $3, 0)`,
+            [username.trim(), passwordHash, role.toLowerCase()]
         );
 
-        res.status(201).json(result.rows[0]);
+        res.status(201).json({
+            ...result.rows[0],
+            must_change_password: Boolean(result.rows[0].must_change_password)
+        });
     } catch (err) {
         console.error('Create user error:', err);
         res.status(500).json({ error: 'Kullanıcı oluşturulamadı.' });
@@ -103,12 +175,20 @@ router.post('/users', authenticateToken, requireRole('admin'), async (req, res) 
 // PUT /api/auth/users/:id — Kullanıcı rolünü veya şifresini güncelle (Admin yetkisi gerekir)
 router.put('/users/:id', authenticateToken, requireRole('admin'), async (req, res) => {
     const { id } = req.params;
-    const { role, password } = req.body;
+    const { role, password, must_change_password } = req.body;
 
     try {
         // Kendi yetkisini düşürmesini engelle
         if (parseInt(id) === req.user.id && role && role !== 'admin') {
             return res.status(400).json({ error: 'Kendi yöneticilik (admin) rolünüzü kaldıramazsınız.' });
+        }
+
+        if (role && !ALLOWED_ROLES.includes(role.toLowerCase())) {
+            return res.status(400).json({ error: `Geçersiz rol. İzin verilen roller: ${ALLOWED_ROLES.join(', ')}` });
+        }
+
+        if (password && (typeof password !== 'string' || password.length < 8)) {
+            return res.status(400).json({ error: 'Şifre en az 8 karakter uzunluğunda olmalıdır.' });
         }
 
         let query = 'UPDATE users SET updated_at = GETDATE()';
@@ -117,7 +197,7 @@ router.put('/users/:id', authenticateToken, requireRole('admin'), async (req, re
 
         if (role) {
             query += `, role = $${paramIndex++}`;
-            params.push(role);
+            params.push(role.toLowerCase());
         }
 
         if (password) {
@@ -126,7 +206,12 @@ router.put('/users/:id', authenticateToken, requireRole('admin'), async (req, re
             params.push(passwordHash);
         }
 
-        query += ` OUTPUT INSERTED.id, INSERTED.username, INSERTED.role, INSERTED.created_at WHERE id = $${paramIndex}`;
+        if (must_change_password !== undefined) {
+            query += `, must_change_password = $${paramIndex++}`;
+            params.push(must_change_password ? 1 : 0);
+        }
+
+        query += ` OUTPUT INSERTED.id, INSERTED.username, INSERTED.role, INSERTED.must_change_password, INSERTED.created_at WHERE id = $${paramIndex}`;
         params.push(id);
 
         const result = await pool.query(query, params);
@@ -134,7 +219,10 @@ router.put('/users/:id', authenticateToken, requireRole('admin'), async (req, re
             return res.status(404).json({ error: 'Kullanıcı bulunamadı.' });
         }
 
-        res.json(result.rows[0]);
+        res.json({
+            ...result.rows[0],
+            must_change_password: Boolean(result.rows[0].must_change_password)
+        });
     } catch (err) {
         console.error('Update user error:', err);
         res.status(500).json({ error: 'Kullanıcı güncellenemedi.' });

@@ -1,11 +1,12 @@
 import os
 import json
 import datetime
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, BackgroundTasks, Header
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, BackgroundTasks, Header, Depends
 from fastapi.responses import FileResponse
 from app.utils.file_utils import TEMP_DIR, OUTPUT_DIR, save_upload_file, generate_unique_filename
 from app.services import pdf_ops
 from app.utils import logger
+from app.utils.auth import require_authenticated_user
 
 router = APIRouter(prefix="/api/pdf", tags=["pdf-tools"])
 
@@ -18,11 +19,11 @@ def cleanup_file(path: str):
             pass
 
 @router.post("/preview")
-async def get_preview(file: UploadFile = File(...), authorization: str = Header(None)):
+async def get_preview(file: UploadFile = File(...), user: dict = Depends(require_authenticated_user)):
     """
     Accepts a PDF file and returns a list of base64-encoded page preview JPEGs.
     """
-    user_id = logger.get_user_id_from_token(authorization)
+    user_id = user.get("id")
     created_at = datetime.datetime.now()
     file_path = None
     file_size = 0
@@ -66,14 +67,14 @@ async def get_preview(file: UploadFile = File(...), authorization: str = Header(
             cleanup_file(file_path)
 
 @router.post("/merge")
-async def merge_files(files: list[UploadFile] = File(...), authorization: str = Header(None)):
+async def merge_files(files: list[UploadFile] = File(...), user: dict = Depends(require_authenticated_user)):
     """
     Accepts multiple PDF files, merges them in the order sent, and returns a download link.
     """
     if len(files) < 2:
         raise HTTPException(status_code=400, detail="Please upload at least 2 PDF files to merge.")
     
-    user_id = logger.get_user_id_from_token(authorization)
+    user_id = user.get("id")
     created_at = datetime.datetime.now()
     saved_paths = []
     total_size = 0
@@ -126,11 +127,11 @@ async def merge_files(files: list[UploadFile] = File(...), authorization: str = 
             cleanup_file(path)
 
 @router.post("/split")
-async def split_file(file: UploadFile = File(...), range_str: str = Form(...), authorization: str = Header(None)):
+async def split_file(file: UploadFile = File(...), range_str: str = Form(...), user: dict = Depends(require_authenticated_user)):
     """
     Extracts specified page range from a PDF and returns the download link.
     """
-    user_id = logger.get_user_id_from_token(authorization)
+    user_id = user.get("id")
     created_at = datetime.datetime.now()
     file_path = None
     file_size = 0
@@ -196,12 +197,12 @@ async def split_file(file: UploadFile = File(...), range_str: str = Form(...), a
             cleanup_file(file_path)
 
 @router.post("/reorder")
-async def reorder_file(file: UploadFile = File(...), page_configs: str = Form(...), authorization: str = Header(None)):
+async def reorder_file(file: UploadFile = File(...), page_configs: str = Form(...), user: dict = Depends(require_authenticated_user)):
     """
     Reorders, rotates, and deletes pages in a PDF based on page_configs JSON string.
     page_configs format: [{"index": int, "rotation": int}]
     """
-    user_id = logger.get_user_id_from_token(authorization)
+    user_id = user.get("id")
     created_at = datetime.datetime.now()
     file_path = None
     file_size = 0
@@ -259,14 +260,14 @@ async def reorder_file(file: UploadFile = File(...), page_configs: str = Form(..
             cleanup_file(file_path)
 
 @router.post("/compress")
-async def compress_file(file: UploadFile = File(...), quality: str = Form("medium"), authorization: str = Header(None)):
+async def compress_file(file: UploadFile = File(...), quality: str = Form("medium"), user: dict = Depends(require_authenticated_user)):
     """
     Compresses PDF file size based on quality ('low', 'medium', 'high').
     """
     if quality not in ("low", "medium", "high"):
         raise HTTPException(status_code=400, detail="Invalid quality value. Choose 'low', 'medium', or 'high'.")
         
-    user_id = logger.get_user_id_from_token(authorization)
+    user_id = user.get("id")
     created_at = datetime.datetime.now()
     file_path = None
     file_size = 0
@@ -324,12 +325,12 @@ async def watermark_file(
     opacity: float = Form(0.3),
     font_size: int = Form(50),
     rotation: int = Form(45),
-    authorization: str = Header(None)
+    user: dict = Depends(require_authenticated_user)
 ):
     """
     Applies text watermark to all PDF pages.
     """
-    user_id = logger.get_user_id_from_token(authorization)
+    user_id = user.get("id")
     created_at = datetime.datetime.now()
     file_path = None
     file_size = 0
@@ -387,7 +388,7 @@ async def watermark_file(
             cleanup_file(file_path)
 
 @router.get("/download/{file_id}")
-async def download_file(file_id: str, background_tasks: BackgroundTasks):
+async def download_file(file_id: str, background_tasks: BackgroundTasks, user: dict = Depends(require_authenticated_user)):
     """
     Serves the output PDF file and schedules it for deletion in the background.
     """

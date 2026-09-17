@@ -26,18 +26,61 @@ const actionsRouter = require('./routes/actions');
 const phoneDirectoryRouter = require('./routes/phoneDirectory');
 const ipamRouter = require('./routes/ipam');
 
+const helmet = require('helmet');
+const jwt = require('jsonwebtoken');
+
 const app = express();
 const server = http.createServer(app);
 
+// CORS configuration
+const allowedOrigins = process.env.CORS_ORIGIN 
+    ? process.env.CORS_ORIGIN.split(',').map(s => s.trim())
+    : ['http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:80', 'http://localhost:3000', 'http://localhost'];
+
+const corsOptions = {
+    origin: (origin, callback) => {
+        if (!origin) return callback(null, true);
+        if (allowedOrigins.includes('*') || allowedOrigins.includes(origin)) {
+            return callback(null, true);
+        }
+        return callback(new Error(`CORS blocked for origin: ${origin}`));
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
+};
+
 const io = new Server(server, {
     cors: {
-        origin: '*',
-        methods: ['GET', 'POST', 'PUT', 'DELETE']
+        origin: allowedOrigins.includes('*') ? '*' : allowedOrigins,
+        methods: ['GET', 'POST', 'PUT', 'DELETE'],
+        credentials: true
     }
 });
 
-// Middleware
-app.use(cors());
+// Socket.IO JWT Authentication Middleware
+const JWT_SECRET = process.env.JWT_SECRET;
+io.use((socket, next) => {
+    const token = socket.handshake.auth?.token || 
+                  socket.handshake.headers?.authorization?.replace(/^Bearer\s+/, '') || 
+                  socket.handshake.query?.token;
+    if (!token) {
+        return next(new Error('Authentication error: token required'));
+    }
+    try {
+        const decoded = jwt.verify(token, JWT_SECRET);
+        socket.user = decoded;
+        next();
+    } catch (err) {
+        return next(new Error('Authentication error: invalid or expired token'));
+    }
+});
+
+// Security & Body Parsing Middleware
+app.use(helmet({
+    contentSecurityPolicy: false,
+    crossOriginEmbedderPolicy: false
+}));
+app.use(cors(corsOptions));
 app.use(express.json({ limit: '5mb' })); // Yazılım envanteri büyük olabilir
 
 // Socket.IO instance'ını Express app'e bağla
@@ -47,19 +90,31 @@ app.set('io', io);
 app.use('/api/auth', authRouter);
 app.use('/api/analytics', authenticateToken, analyticsRouter);
 app.use('/api/devices', authenticateToken, devicesRouter);
-app.use('/api/heartbeat', heartbeatRouter); // client heartbeats
+app.use('/api/heartbeat', heartbeatRouter); // Agent heartbeats (uses authenticateAgent)
 app.use('/api/dashboard', authenticateToken, dashboardRouter);
 app.use('/api/printers', authenticateToken, printersRouter);
-app.use('/api/software', authenticateToken, softwareRouter);
-app.use('/api/agent', agentUpdateRouter); // client updates
+app.use('/api/software', softwareRouter); // Agent POST uses authenticateAgent, Client GET uses authenticateToken
+app.use('/api/agent', agentUpdateRouter); // Agent updates (uses authenticateAgent)
 app.use('/api/maintenance', authenticateToken, maintenanceRouter);
 app.use('/api/actions', authenticateToken, actionsRouter);
 app.use('/api/phone-directory', authenticateToken, phoneDirectoryRouter);
 app.use('/api/ipam', authenticateToken, ipamRouter);
 
-// Health check
+// Liveness health check
 app.get('/api/health', (req, res) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// Readiness probe (verifies database connectivity)
+const { poolPromise } = require('./db/connection');
+app.get('/api/ready', async (req, res) => {
+    try {
+        const pool = await poolPromise;
+        await pool.request().query('SELECT 1 AS ready');
+        res.json({ status: 'ready', database: 'connected', timestamp: new Date().toISOString() });
+    } catch (err) {
+        res.status(503).json({ status: 'not_ready', database: 'disconnected', error: err.message });
+    }
 });
 
 // Socket.IO bağlantı yönetimi
@@ -149,4 +204,8 @@ async function startServer() {
     }
 }
 
-startServer();
+if (require.main === module) {
+    startServer();
+}
+
+module.exports = { app, server, startServer };

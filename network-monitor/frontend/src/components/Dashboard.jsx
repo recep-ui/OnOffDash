@@ -300,10 +300,11 @@ function DashboardContent({ connected, on, off, socket }) {
     }
   };
 
-  const handleExportExcel = () => {
+  const handleExportExcel = async () => {
     try {
       showToast('info', '📤 Excel Hazırlanıyor', 'Excel dosyası indiriliyor...');
-      window.location.href = `/api/devices/export?token=${token}`;
+      await api.downloadFileWithAuth('/api/devices/export', 'Cihaz_Envanter_Export.xlsx');
+      showToast('success', '✅ İndirme Başarılı', 'Cihaz envanteri Excel dosyası indirildi.');
     } catch (err) {
       showToast('error', '❌ Hata', 'Excel dışa aktarılırken hata oluştu: ' + err.message);
     }

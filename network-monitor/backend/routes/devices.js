@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const { pool } = require('../db/connection');
 const xlsx = require('xlsx');
+const { requireRole } = require('../middleware/auth');
+const { sanitizeRows } = require('../utils/excelSanitizer');
 
 // GET /api/devices — Tüm cihazları listele
 router.get('/', async (req, res) => {
@@ -71,11 +73,16 @@ router.get('/departments', async (req, res) => {
 });
 
 // POST /api/devices/import - Excel verilerini içe aktar (çakışan kayıtlar için DB verisini ez, excel verisine dokunma)
-router.post('/import', async (req, res) => {
+router.post('/import', requireRole('operator'), async (req, res) => {
     try {
         const { fileData } = req.body;
         if (!fileData) {
             return res.status(400).json({ error: 'fileData (Base64) gereklidir.' });
+        }
+
+        // 10MB payload size limit check
+        if (typeof fileData !== 'string' || fileData.length > 14 * 1024 * 1024) {
+            return res.status(413).json({ error: 'Dosya boyutu çok büyük (Maksimum 10MB).' });
         }
 
         // Base64'ten raw buffer'a dönüştür
@@ -312,7 +319,7 @@ router.get('/export', async (req, res) => {
             'Ajan Yüklü': d.agent_installed ? 'Evet' : 'Hayır'
         }));
 
-        const ws = xlsx.utils.json_to_sheet(excelRows);
+        const ws = xlsx.utils.json_to_sheet(sanitizeRows(excelRows));
         const wb = xlsx.utils.book_new();
         xlsx.utils.book_append_sheet(wb, ws, "Cihaz Envanteri");
 
@@ -342,7 +349,7 @@ router.get('/:id', async (req, res) => {
 });
 
 // POST /api/devices — Manuel cihaz ekle
-router.post('/', async (req, res) => {
+router.post('/', requireRole('operator'), async (req, res) => {
     try {
         const { hostname, ip_address, mac_address, department, os_name, username, notes } = req.body;
 
@@ -388,7 +395,7 @@ router.post('/', async (req, res) => {
 });
 
 // PUT /api/devices/:id — Cihaz güncelle
-router.put('/:id', async (req, res) => {
+router.put('/:id', requireRole('operator'), async (req, res) => {
     try {
         const {
             hostname, ip_address, mac_address, department, os_name, username, notes,
@@ -456,7 +463,7 @@ router.put('/:id', async (req, res) => {
 });
 
 // DELETE /api/devices/:id — Cihaz sil
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', requireRole('admin'), async (req, res) => {
     try {
         const result = await pool.query('DELETE FROM devices OUTPUT DELETED.id WHERE id = $1', [req.params.id]);
         if (result.rows.length === 0) {

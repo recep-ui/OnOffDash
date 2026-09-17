@@ -19,7 +19,7 @@ import StatusBadge from './StatusBadge';
 import Button from './ui/Button';
 import { useNotification } from './NotificationProvider';
 import PrinterDetailModal from './PrinterDetailModal';
-import { fetchWithAuth } from '../services/api';
+import { fetchWithAuth, downloadFileWithAuth } from '../services/api';
 
 function TonerBars({ toners = [] }) {
   if (!toners || toners.length === 0) {
@@ -111,9 +111,13 @@ export default function PrinterTable({
     }
   };
 
-  const handleExportExcel = () => {
-    const token = localStorage.getItem('token');
-    window.open(`/api/printers/export?token=${token}`, '_blank');
+  const handleExportExcel = async () => {
+    try {
+      await downloadFileWithAuth('/api/printers/export', 'Yazici_Listesi_Export.xlsx');
+      showToast('success', '✅ İndirme Başarılı', 'Yazıcı listesi Excel dosyası indirildi.');
+    } catch (err) {
+      showToast('error', '❌ Hata', err.message || 'Excel dışa aktarma başarısız.');
+    }
   };
 
   const handleImportExcel = (e) => {

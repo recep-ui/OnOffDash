@@ -1,10 +1,11 @@
 import os
 import datetime
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Header
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Header, Depends
 from app.utils.file_utils import save_upload_file
 from app.services import zip_services
 from app.utils import logger
 from app.config import MAX_BATCH_FILES
+from app.utils.auth import require_authenticated_user
 
 router = APIRouter(prefix="/api/file-tools/zip", tags=["zip-tools"])
 
@@ -19,14 +20,14 @@ def cleanup_file(path: str):
 async def create_zip_endpoint(
     files: list[UploadFile] = File(...),
     compression_level: str = Form("normal"),
-    authorization: str = Header(None)
+    user: dict = Depends(require_authenticated_user)
 ):
     if len(files) == 0:
         raise HTTPException(status_code=400, detail="En az bir dosya yüklemelisiniz.")
     if len(files) > MAX_BATCH_FILES:
         raise HTTPException(status_code=400, detail=f"Tek seferde en fazla {MAX_BATCH_FILES} dosya sıkıştırabilirsiniz.")
         
-    user_id = logger.get_user_id_from_token(authorization)
+    user_id = user.get("id")
     created_at = datetime.datetime.now()
     
     saved_items = []

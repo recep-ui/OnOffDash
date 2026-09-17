@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const { pool } = require('../db/connection');
 const xlsx = require('xlsx');
+const { requireRole } = require('../middleware/auth');
+const { sanitizeRows } = require('../utils/excelSanitizer');
 
 const MONTHS = [
     'Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran',
@@ -145,7 +147,7 @@ router.get('/export', async (req, res) => {
             return rowData;
         });
 
-        const ws = xlsx.utils.json_to_sheet(excelRows);
+        const ws = xlsx.utils.json_to_sheet(sanitizeRows(excelRows));
         const wb = xlsx.utils.book_new();
         xlsx.utils.book_append_sheet(wb, ws, "Bakım Tablosu");
 
@@ -160,12 +162,15 @@ router.get('/export', async (req, res) => {
 });
 
 // POST /api/maintenance/import - Bakım listesini Excel'den içe aktar
-router.post('/import', async (req, res) => {
+router.post('/import', requireRole('operator'), async (req, res) => {
     const client = await pool.connect();
     try {
         const { fileData } = req.body;
         if (!fileData) {
             return res.status(400).json({ error: 'fileData (Base64) gereklidir.' });
+        }
+        if (typeof fileData !== 'string' || fileData.length > 14 * 1024 * 1024) {
+            return res.status(413).json({ error: 'Dosya boyutu çok büyük (Maksimum 10MB).' });
         }
 
         const buffer = Buffer.from(fileData, 'base64');
@@ -244,7 +249,7 @@ router.get('/grid', handleGetGrid);
 router.get('/', handleGetGrid);
 
 // POST /api/maintenance/toggle — Bir cihazın belirli bir ay için bakım durumunu değiştir
-router.post('/toggle', async (req, res) => {
+router.post('/toggle', requireRole('operator'), async (req, res) => {
     try {
         const { device_id, month_name, is_completed } = req.body;
 
@@ -274,7 +279,7 @@ router.post('/toggle', async (req, res) => {
 });
 
 // POST /api/maintenance/:id — Cihaz ID bazlı toggle desteği
-router.post('/:id', async (req, res) => {
+router.post('/:id', requireRole('operator'), async (req, res) => {
     try {
         const deviceId = req.params.id;
         const { month_name, is_completed } = req.body;

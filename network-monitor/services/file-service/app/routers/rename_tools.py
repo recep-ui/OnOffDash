@@ -1,12 +1,13 @@
 import os
 import json
 import datetime
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Header
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Header, Depends
 from pydantic import BaseModel
 from app.utils.file_utils import save_upload_file
 from app.services import rename_services
 from app.utils import logger
 from app.config import MAX_BATCH_FILES
+from app.utils.auth import require_authenticated_user
 
 router = APIRouter(prefix="/api/file-tools/rename", tags=["rename-tools"])
 
@@ -22,7 +23,7 @@ def cleanup_file(path: str):
             pass
 
 @router.post("/preview")
-async def rename_preview_endpoint(request: PreviewRequest):
+async def rename_preview_endpoint(request: PreviewRequest, user: dict = Depends(require_authenticated_user)):
     try:
         preview = rename_services.get_rename_preview(
             file_names=request.filenames,
@@ -39,7 +40,7 @@ async def rename_preview_endpoint(request: PreviewRequest):
 async def rename_apply_endpoint(
     files: list[UploadFile] = File(...),
     rules: str = Form(...), # JSON string of rules
-    authorization: str = Header(None)
+    user: dict = Depends(require_authenticated_user)
 ):
     if len(files) == 0:
         raise HTTPException(status_code=400, detail="En az bir dosya yüklemelisiniz.")
@@ -51,7 +52,7 @@ async def rename_apply_endpoint(
     except Exception:
         raise HTTPException(status_code=400, detail="Kurallar geçerli bir JSON objesi olmalıdır.")
         
-    user_id = logger.get_user_id_from_token(authorization)
+    user_id = user.get("id")
     created_at = datetime.datetime.now()
     
     saved_items = []

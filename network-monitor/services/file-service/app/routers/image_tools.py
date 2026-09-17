@@ -1,9 +1,10 @@
 import os
 import datetime
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Header
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Header, Depends
 from app.utils.file_utils import save_upload_file, BLACKLISTED_EXTENSIONS
 from app.services import image_services
 from app.utils import logger
+from app.utils.auth import require_authenticated_user
 
 router = APIRouter(prefix="/api/file-tools/image", tags=["image-tools"])
 
@@ -24,9 +25,9 @@ async def resize_image_endpoint(
     keep_aspect: bool = Form(True),
     scale_percent: float = Form(None),
     output_format: str = Form("JPEG"),
-    authorization: str = Header(None)
+    user: dict = Depends(require_authenticated_user)
 ):
-    user_id = logger.get_user_id_from_token(authorization)
+    user_id = user.get("id")
     created_at = datetime.datetime.now()
     file_path = None
     file_size = 0
@@ -89,9 +90,9 @@ async def compress_image_endpoint(
     file: UploadFile = File(...),
     quality: int = Form(80),
     output_format: str = Form("JPEG"),
-    authorization: str = Header(None)
+    user: dict = Depends(require_authenticated_user)
 ):
-    user_id = logger.get_user_id_from_token(authorization)
+    user_id = user.get("id")
     created_at = datetime.datetime.now()
     file_path = None
     file_size = 0
@@ -151,9 +152,9 @@ async def png_to_jpg_endpoint(
     file: UploadFile = File(...),
     quality: int = Form(80),
     bg_color: str = Form("#ffffff"),
-    authorization: str = Header(None)
+    user: dict = Depends(require_authenticated_user)
 ):
-    user_id = logger.get_user_id_from_token(authorization)
+    user_id = user.get("id")
     created_at = datetime.datetime.now()
     file_path = None
     file_size = 0
@@ -211,9 +212,9 @@ async def png_to_jpg_endpoint(
 @router.post("/jpg-to-png")
 async def jpg_to_png_endpoint(
     file: UploadFile = File(...),
-    authorization: str = Header(None)
+    user: dict = Depends(require_authenticated_user)
 ):
-    user_id = logger.get_user_id_from_token(authorization)
+    user_id = user.get("id")
     created_at = datetime.datetime.now()
     file_path = None
     file_size = 0

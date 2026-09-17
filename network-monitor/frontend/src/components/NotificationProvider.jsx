@@ -17,17 +17,26 @@ export default function NotificationProvider({ socket, children }) {
     const [permissionGranted, setPermissionGranted] = useState(false);
     const notifiedRef = useRef(new Set()); // Duplicate engelleme
 
-    // Bildirim izni iste
+    // Check notification permission on mount without triggering unsolicited browser block
     useEffect(() => {
-        if ('Notification' in window) {
+        if (typeof window !== 'undefined' && 'Notification' in window) {
             if (Notification.permission === 'granted') {
                 setPermissionGranted(true);
-            } else if (Notification.permission !== 'denied') {
-                Notification.requestPermission().then(perm => {
-                    setPermissionGranted(perm === 'granted');
-                });
             }
         }
+    }, []);
+
+    const requestNotificationPermission = useCallback(async () => {
+        if (typeof window !== 'undefined' && 'Notification' in window) {
+            try {
+                const perm = await Notification.requestPermission();
+                setPermissionGranted(perm === 'granted');
+                return perm === 'granted';
+            } catch (e) {
+                return false;
+            }
+        }
+        return false;
     }, []);
 
     // Ses çal
@@ -125,7 +134,7 @@ export default function NotificationProvider({ socket, children }) {
     };
 
     return (
-        <NotificationContext.Provider value={{ showToast }}>
+        <NotificationContext.Provider value={{ showToast, requestNotificationPermission, permissionGranted }}>
             {children}
 
             {/* Toast Bildirimleri */}

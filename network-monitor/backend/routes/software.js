@@ -1,9 +1,11 @@
 const express = require('express');
 const router = express.Router();
 const { pool } = require('../db/connection');
+const { authenticateToken } = require('../middleware/auth');
+const { authenticateAgent } = require('../middleware/agentAuth');
 
 // POST /api/software — Agent'tan yazılım listesi al (bulk upsert)
-router.post('/', async (req, res) => {
+router.post('/', authenticateAgent, async (req, res) => {
     try {
         const { device_ip, software } = req.body;
 
@@ -75,7 +77,7 @@ router.post('/', async (req, res) => {
 });
 
 // GET /api/software/:deviceId — Bir cihazın yazılım listesini döner
-router.get('/:deviceId', async (req, res) => {
+router.get('/:deviceId', authenticateToken, async (req, res) => {
     try {
         const { search, source, sortBy, sortOrder } = req.query;
 
@@ -109,7 +111,7 @@ router.get('/:deviceId', async (req, res) => {
 });
 
 // GET /api/software/:deviceId/summary — Yazılım özeti
-router.get('/:deviceId/summary', async (req, res) => {
+router.get('/:deviceId/summary', authenticateToken, async (req, res) => {
     try {
         const result = await pool.query(
             `SELECT source, COUNT(*) as count 

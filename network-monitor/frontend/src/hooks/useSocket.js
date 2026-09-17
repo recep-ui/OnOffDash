@@ -3,56 +3,68 @@ import { io } from 'socket.io-client';
 
 export function useSocket() {
   const socketRef = useRef(null);
+  const [socket, setSocket] = useState(null);
   const [connected, setConnected] = useState(false);
   const listenersRef = useRef({});
 
   useEffect(() => {
-    const socket = io(window.location.origin, {
+    const token = localStorage.getItem('token');
+    const socketInstance = io(window.location.origin, {
       transports: ['websocket', 'polling'],
+      auth: { token },
       reconnection: true,
       reconnectionAttempts: Infinity,
       reconnectionDelay: 1000,
     });
 
-    socketRef.current = socket;
+    socketRef.current = socketInstance;
+    setSocket(socketInstance);
 
-    socket.on('connect', () => {
-      console.log('🔌 Socket connected:', socket.id);
+    socketInstance.on('connect', () => {
+      console.log('🔌 Socket connected:', socketInstance.id);
       setConnected(true);
     });
 
-    socket.on('disconnect', () => {
+    socketInstance.on('disconnect', () => {
       console.log('🔌 Socket disconnected');
       setConnected(false);
     });
 
+    socketInstance.on('connect_error', (err) => {
+      if (err && err.message && err.message.includes('Authentication error')) {
+        console.warn('🔌 Socket authentication required:', err.message);
+      }
+    });
+
     return () => {
-      socket.disconnect();
+      socketInstance.disconnect();
+      socketRef.current = null;
+      setSocket(null);
     };
   }, []);
 
   const on = useCallback((event, callback) => {
-    const socket = socketRef.current;
-    if (!socket) return;
+    const s = socketRef.current;
+    if (!s) return;
 
     // Remove existing listener for this event to avoid duplicates
     if (listenersRef.current[event]) {
-      socket.off(event, listenersRef.current[event]);
+      s.off(event, listenersRef.current[event]);
     }
 
     listenersRef.current[event] = callback;
-    socket.on(event, callback);
+    s.on(event, callback);
   }, []);
 
   const off = useCallback((event) => {
-    const socket = socketRef.current;
-    if (!socket) return;
+    const s = socketRef.current;
+    if (!s) return;
 
     if (listenersRef.current[event]) {
-      socket.off(event, listenersRef.current[event]);
+      s.off(event, listenersRef.current[event]);
       delete listenersRef.current[event];
     }
   }, []);
 
-  return { connected, on, off };
+  return { connected, on, off, socket };
 }

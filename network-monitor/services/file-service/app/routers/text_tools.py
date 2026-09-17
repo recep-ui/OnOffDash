@@ -1,9 +1,10 @@
 import os
 import datetime
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Header
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Header, Depends
 from app.utils.file_utils import save_upload_file
 from app.services import text_services
 from app.utils import logger
+from app.utils.auth import require_authenticated_user
 
 router = APIRouter(prefix="/api/file-tools/text", tags=["text-tools"])
 
@@ -19,9 +20,9 @@ def cleanup_file(path: str):
 @router.post("/analyze-encoding")
 async def analyze_encoding_endpoint(
     file: UploadFile = File(...),
-    authorization: str = Header(None)
+    user: dict = Depends(require_authenticated_user)
 ):
-    user_id = logger.get_user_id_from_token(authorization)
+    user_id = user.get("id")
     created_at = datetime.datetime.now()
     file_path = None
     file_size = 0
@@ -68,9 +69,9 @@ async def convert_encoding_endpoint(
     file: UploadFile = File(...),
     in_encoding: str = Form("auto"),
     out_encoding: str = Form("utf-8"),
-    authorization: str = Header(None)
+    user: dict = Depends(require_authenticated_user)
 ):
-    user_id = logger.get_user_id_from_token(authorization)
+    user_id = user.get("id")
     created_at = datetime.datetime.now()
     file_path = None
     file_size = 0

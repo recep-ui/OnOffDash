@@ -18,7 +18,7 @@ import {
   Wrench
 } from 'lucide-react';
 import { useNotification } from './NotificationProvider';
-import { fetchWithAuth, importActionsExcel } from '../services/api';
+import { fetchWithAuth, importActionsExcel, downloadFileWithAuth } from '../services/api';
 import Button from './ui/Button';
 import Modal from './ui/Modal';
 import ConfirmDialog from './ui/ConfirmDialog';
@@ -130,9 +130,13 @@ export default function MaterialsPanel({ role, onSwitchTab }) {
     return true;
   });
 
-  const handleExportExcel = () => {
-    const token = localStorage.getItem('token');
-    window.open(`/api/actions/export?type=material&token=${token}`, '_blank');
+  const handleExportExcel = async () => {
+    try {
+      await downloadFileWithAuth('/api/actions/export?type=material', 'Gelen_Giden_Malzeme_Export.xlsx');
+      showToast('success', '✅ İndirme Başarılı', 'Malzeme listesi Excel dosyası indirildi.');
+    } catch (err) {
+      showToast('error', '❌ Hata', err.message || 'Excel dışa aktarma başarısız.');
+    }
   };
 
   const handleImportExcel = (e) => {

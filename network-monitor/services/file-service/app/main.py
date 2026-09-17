@@ -1,11 +1,12 @@
 import os
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from app.config import LOG_MODE, OUTPUT_DIR
 from app.routers import image_tools, csv_tools, text_tools, zip_tools, rename_tools
 from app.utils.cleanup import start_cleanup_daemon
 from app.utils.logger import ensure_db_table
+from app.utils.auth import require_authenticated_user
 
 app = FastAPI(
     title="File Tools Service",
@@ -53,7 +54,7 @@ def health_check():
     }
 
 @app.get("/api/file-tools/download/{file_id}")
-async def download_file_endpoint(file_id: str):
+async def download_file_endpoint(file_id: str, user: dict = Depends(require_authenticated_user)):
     """
     Serves generated output files securely. Prevents path traversal.
     """

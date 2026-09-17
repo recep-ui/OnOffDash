@@ -112,11 +112,16 @@ async function sendHeartbeat() {
         const payload = await getSystemInfo();
         const url = `${config.serverUrl}/api/heartbeat`;
 
+        const headers = {
+            'Content-Type': 'application/json'
+        };
+        if (config.agentApiKey) {
+            headers['X-Agent-Key'] = config.agentApiKey;
+        }
+
         const response = await fetch(url, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
+            headers,
             body: JSON.stringify(payload)
         });
 
@@ -144,11 +149,16 @@ async function sendSoftwareInventory() {
         const sysInfo = await getSystemInfo();
 
         const url = `${config.serverUrl}/api/software`;
+        const headers = {
+            'Content-Type': 'application/json'
+        };
+        if (config.agentApiKey) {
+            headers['X-Agent-Key'] = config.agentApiKey;
+        }
+
         const response = await fetch(url, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
+            headers,
             body: JSON.stringify({
                 device_ip: sysInfo.ip_address,
                 software: software

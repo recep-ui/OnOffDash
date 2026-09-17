@@ -1,6 +1,7 @@
 const fetch = require('node-fetch');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const { execSync } = require('child_process');
 const config = require('./config');
 
@@ -11,10 +12,15 @@ async function checkForUpdate() {
         console.log(`🔄 Güncelleme kontrol ediliyor... (Mevcut: v${CURRENT_VERSION})`);
 
         const url = `${config.serverUrl}/api/agent/version`;
-        const response = await fetch(url, { timeout: 10000 });
+        const headers = {};
+        if (config.agentApiKey) {
+            headers['X-Agent-Key'] = config.agentApiKey;
+        }
+
+        const response = await fetch(url, { headers, timeout: 10000 });
 
         if (!response.ok) {
-            console.log('   ⚠️ Versiyon bilgisi alınamadı');
+            console.log(`   ⚠️ Versiyon bilgisi alınamadı: HTTP ${response.status}`);
             return false;
         }
 
@@ -29,7 +35,7 @@ async function checkForUpdate() {
         // Versiyon karşılaştırma (semver)
         if (compareVersions(latestVersion, CURRENT_VERSION) > 0) {
             console.log(`   🆕 Yeni versiyon mevcut: v${latestVersion} (Mevcut: v${CURRENT_VERSION})`);
-            return await downloadAndUpdate();
+            return await downloadAndUpdate(versionData);
         }
 
         return false;
@@ -39,24 +45,51 @@ async function checkForUpdate() {
     }
 }
 
-async function downloadAndUpdate() {
+async function downloadAndUpdate(versionData = {}) {
+    const exePath = process.execPath;
+    const exeDir = path.dirname(exePath);
+    const backupPath = path.join(exeDir, 'OnOffDash_Agent.exe.bak');
+    const newPath = path.join(exeDir, 'OnOffDash_Agent_new.exe');
+
     try {
         const downloadUrl = `${config.serverUrl}/api/agent/download`;
         console.log('   ⬇️ Yeni versiyon indiriliyor...');
 
-        const response = await fetch(downloadUrl, { timeout: 120000 });
+        const headers = {};
+        if (config.agentApiKey) {
+            headers['X-Agent-Key'] = config.agentApiKey;
+        }
+
+        const response = await fetch(downloadUrl, { headers, timeout: 120000 });
         if (!response.ok) {
             console.error('   ❌ İndirme başarısız:', response.status);
             return false;
         }
 
         const buffer = await response.buffer();
-        
-        // Dosya yollarını belirle
-        const exePath = process.execPath;
-        const exeDir = path.dirname(exePath);
-        const backupPath = path.join(exeDir, 'OnOffDash_Agent.exe.bak');
-        const newPath = path.join(exeDir, 'OnOffDash_Agent_new.exe');
+
+        // 1. Beklenen dosya boyutu kontrolü
+        if (versionData.size && buffer.length !== versionData.size) {
+            console.error(`   ❌ GÜVENLİK HATASI: Dosya boyutu uyumsuz! (Beklenen: ${versionData.size}, İndirilen: ${buffer.length})`);
+            return false;
+        }
+
+        // 2. SHA-256 Bütünlük Doğrulaması (Supply-Chain Verification)
+        const computedSha256 = crypto.createHash('sha256').update(buffer).digest('hex');
+        const expectedSha256 = versionData.sha256 || response.headers.get('x-agent-sha256');
+
+        if (expectedSha256) {
+            if (computedSha256.toLowerCase() !== expectedSha256.toLowerCase()) {
+                console.error('   ❌ KRİTİK GÜVENLİK UYARISI: İndirilen dosyanın SHA-256 özeti sunucu manifesti ile EŞLEŞMİYOR!');
+                console.error(`      Hesaplanan: ${computedSha256}`);
+                console.error(`      Beklenen:   ${expectedSha256}`);
+                console.error('      Güncelleme iptal edildi. Orijinal ajan çalışmaya devam ediyor.');
+                return false;
+            }
+            console.log('   🛡️ SHA-256 bütünlük doğrulaması BAŞARILI.');
+        } else {
+            console.warn('   ⚠️ Sunucu SHA-256 sağlama değeri sağlamadı. Dikkatli olun.');
+        }
 
         // Yeni dosyayı kaydet
         fs.writeFileSync(newPath, buffer);
@@ -64,7 +97,7 @@ async function downloadAndUpdate() {
 
         // Mevcut exe'yi yedekle
         if (fs.existsSync(backupPath)) {
-            fs.unlinkSync(backupPath);
+            try { fs.unlinkSync(backupPath); } catch (e) {}
         }
 
         // Windows'ta çalışan exe'yi doğrudan değiştiremeyiz
@@ -80,7 +113,20 @@ if exist "${exePath}" (
     move /Y "${exePath}" "${backupPath}" >nul 2>&1
 )
 move /Y "${newPath}" "${exePath}" >nul 2>&1
+
+:: Servisi başlat
 schtasks /run /tn "${taskName}" >nul 2>&1
+
+:: Servis başlayamadıysa geri yükle (Rollback guard)
+timeout /t 3 /nobreak >nul
+tasklist /fi "imagename eq OnOffDash_Agent.exe" 2>NUL | find /i "OnOffDash_Agent.exe" >nul
+if %errorlevel% neq 0 (
+    if exist "${backupPath}" (
+        move /Y "${backupPath}" "${exePath}" >nul 2>&1
+        schtasks /run /tn "${taskName}" >nul 2>&1
+    )
+)
+
 del "%~f0" >nul 2>&1
 `;
 
@@ -101,6 +147,9 @@ del "%~f0" >nul 2>&1
         return true;
     } catch (err) {
         console.error('   ❌ Güncelleme kurulumu başarısız:', err.message);
+        if (fs.existsSync(newPath)) {
+            try { fs.unlinkSync(newPath); } catch (e) {}
+        }
         return false;
     }
 }
@@ -118,4 +167,4 @@ function compareVersions(a, b) {
     return 0;
 }
 
-module.exports = { checkForUpdate, CURRENT_VERSION };
+module.exports = { checkForUpdate, CURRENT_VERSION, compareVersions };

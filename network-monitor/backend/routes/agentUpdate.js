@@ -2,45 +2,70 @@ const express = require('express');
 const router = express.Router();
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
+const { authenticateAgent } = require('../middleware/agentAuth');
 
 const VERSION_FILE = path.join(__dirname, '..', 'agent_version.json');
 const AGENT_DIR = path.join(__dirname, '..', 'agent_binaries');
 
-// GET /api/agent/version — Güncel agent versiyon bilgisi
-router.get('/version', (req, res) => {
+function getAgentBinaryInfo() {
+    if (!fs.existsSync(AGENT_DIR)) return null;
+    const files = fs.readdirSync(AGENT_DIR).filter(f => f.endsWith('.exe'));
+    if (files.length === 0) return null;
+
+    const filePath = path.join(AGENT_DIR, files[0]);
+    const stat = fs.statSync(filePath);
+    const content = fs.readFileSync(filePath);
+    const sha256 = crypto.createHash('sha256').update(content).digest('hex');
+
+    return {
+        fileName: files[0],
+        filePath,
+        size: stat.size,
+        sha256
+    };
+}
+
+// GET /api/agent/version — Güncel agent versiyon ve SHA-256 bütünlük bilgisi
+router.get('/version', authenticateAgent, (req, res) => {
     try {
-        if (!fs.existsSync(VERSION_FILE)) {
-            return res.json({ version: '1.0.0', minVersion: '1.0.0' });
+        let versionData = { version: '1.0.0', minVersion: '1.0.0' };
+        if (fs.existsSync(VERSION_FILE)) {
+            versionData = JSON.parse(fs.readFileSync(VERSION_FILE, 'utf8'));
         }
-        const versionData = JSON.parse(fs.readFileSync(VERSION_FILE, 'utf8'));
+
+        const binaryInfo = getAgentBinaryInfo();
+        if (binaryInfo) {
+            versionData.sha256 = versionData.sha256 || binaryInfo.sha256;
+            versionData.size = versionData.size || binaryInfo.size;
+        }
+
         res.json(versionData);
     } catch (err) {
-        console.error('Error reading version file:', err);
-        res.json({ version: '1.0.0', minVersion: '1.0.0' });
+        console.error('Error reading agent version:', err);
+        res.status(500).json({ error: 'Failed to read agent version manifest' });
     }
 });
 
-// GET /api/agent/download — Güncel agent exe dosyasını indir
-router.get('/download', (req, res) => {
+// GET /api/agent/download — Güncel agent exe dosyasını indir (Authenticated)
+router.get('/download', authenticateAgent, (req, res) => {
     try {
-        // Önce agent_binaries klasöründe ara
-        if (fs.existsSync(AGENT_DIR)) {
-            const files = fs.readdirSync(AGENT_DIR).filter(f => f.endsWith('.exe'));
-            if (files.length > 0) {
-                const filePath = path.join(AGENT_DIR, files[0]);
-                return res.download(filePath, 'OnOffDash_Agent.exe');
-            }
+        const binaryInfo = getAgentBinaryInfo();
+        if (binaryInfo) {
+            res.setHeader('X-Agent-SHA256', binaryInfo.sha256);
+            res.setHeader('X-Agent-Size', String(binaryInfo.size));
+            return res.download(binaryInfo.filePath, 'OnOffDash_Agent.exe');
         }
 
-        res.status(404).json({ error: 'Agent binary not found. Upload agent exe to backend/agent_binaries/ directory.' });
+        res.status(404).json({ error: 'Agent binary not found on server.' });
     } catch (err) {
-        console.error('Error downloading agent:', err);
-        res.status(500).json({ error: 'Failed to download agent' });
+        console.error('Error downloading agent binary:', err);
+        res.status(500).json({ error: 'Failed to download agent binary' });
     }
 });
 
-// GET /api/agent/changelog — Değişiklik notları (opsiyonel)
-router.get('/changelog', (req, res) => {
+// GET /api/agent/changelog — Değişiklik notları
+router.get('/changelog', authenticateAgent, (req, res) => {
     try {
         if (!fs.existsSync(VERSION_FILE)) {
             return res.json({ changelog: '' });

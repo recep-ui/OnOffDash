@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const { pool } = require('../db/connection');
 const xlsx = require('xlsx');
+const { requireRole } = require('../middleware/auth');
+const { sanitizeRows } = require('../utils/excelSanitizer');
 
 // GET /api/actions/export - Yapılan İşler veya Gelen Giden Malzeme listesini dışa aktar
 router.get('/export', async (req, res) => {
@@ -52,7 +54,7 @@ router.get('/export', async (req, res) => {
             }));
         }
 
-        const ws = xlsx.utils.json_to_sheet(excelRows);
+        const ws = xlsx.utils.json_to_sheet(sanitizeRows(excelRows));
         const wb = xlsx.utils.book_new();
         xlsx.utils.book_append_sheet(wb, ws, sheetName);
 
@@ -164,7 +166,7 @@ function cleanString(val) {
 }
 
 // POST /api/actions/import - Yapılan İşler veya Gelen Giden Malzeme içe aktar
-router.post('/import', async (req, res) => {
+router.post('/import', requireRole('operator'), async (req, res) => {
     const client = await pool.connect();
     try {
         const actionType = req.query.type || req.body.type || 'action';
@@ -172,6 +174,9 @@ router.post('/import', async (req, res) => {
 
         if (!fileData) {
             return res.status(400).json({ error: 'fileData (Base64) gereklidir.' });
+        }
+        if (typeof fileData !== 'string' || fileData.length > 14 * 1024 * 1024) {
+            return res.status(413).json({ error: 'Dosya boyutu çok büyük (Maksimum 10MB).' });
         }
 
         const buffer = Buffer.from(fileData, 'base64');
@@ -350,7 +355,7 @@ router.get('/:id', async (req, res) => {
 });
 
 // POST /api/actions — Yeni aksiyon/malzeme ekle
-router.post('/', async (req, res) => {
+router.post('/', requireRole('operator'), async (req, res) => {
     try {
         const { 
             device_id, arrival_date, action_date, serial_no, came_from, 
@@ -399,7 +404,7 @@ router.post('/', async (req, res) => {
 });
 
 // PUT /api/actions/:id — Aksiyon/malzeme güncelle
-router.put('/:id', async (req, res) => {
+router.put('/:id', requireRole('operator'), async (req, res) => {
     try {
         const { 
             device_id, arrival_date, action_date, serial_no, came_from, 
@@ -462,7 +467,7 @@ router.put('/:id', async (req, res) => {
 });
 
 // DELETE /api/actions/:id — Aksiyon/malzeme sil
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', requireRole('admin'), async (req, res) => {
     try {
         const result = await pool.query(
             `DELETE FROM device_actions OUTPUT DELETED.id WHERE id = $1`,
