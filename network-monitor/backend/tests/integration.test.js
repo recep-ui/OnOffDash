@@ -185,6 +185,12 @@ describe('Integration & Security Infrastructure Tests', () => {
                 assert.throws(() => {
                     validateConfig({ exitOnError: false });
                 }, /JWT_SECRET uses an insecure placeholder value/);
+
+                process.env.JWT_SECRET = 'valid_secure_jwt_secret_key_at_least_32_chars';
+                process.env.AGENT_API_KEY = 'short_agent_key';
+                assert.throws(() => {
+                    validateConfig({ exitOnError: false });
+                }, /AGENT_API_KEY must be at least 32 characters/);
             } finally {
                 console.error = originalConsoleError;
                 if (originalNodeEnv) process.env.NODE_ENV = originalNodeEnv;

@@ -8,7 +8,6 @@ const {
     signManifest, 
     verifyManifest 
 } = require('../utils/agentSigner');
-const { verifySignature } = require('../../agent/updater');
 
 describe('Agent Update Manifest & Integrity', () => {
     it('should calculate valid sha256 checksums for binary files', () => {
@@ -62,12 +61,5 @@ describe('Agent Update Manifest & Integrity', () => {
         const tamperedManifest = { ...manifest, size: 9999999 };
         const isTamperedValid = verifyManifest(tamperedManifest, signature, publicKey);
         assert.strictEqual(isTamperedValid, false, 'Tampered manifest should fail verification');
-
-        // Test with agent updater verifySignature
-        const agentVerified = verifySignature(manifest, manifest.sha256, signature, publicKey);
-        assert.strictEqual(agentVerified, true, 'Agent updater verifySignature should verify');
-
-        const agentTampered = verifySignature(tamperedManifest, tamperedManifest.sha256, signature, publicKey);
-        assert.strictEqual(agentTampered, false, 'Agent updater should reject tampered manifest');
     });
 });

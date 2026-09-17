@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { pool } = require('../db/connection');
-const xlsx = require('xlsx');
+const { createExcelMultiSheetAoa, readExcelSheetsAoa } = require('../utils/excelHelper');
 const { requireRole } = require('../middleware/auth');
 const { sanitizeCellValue } = require('../utils/excelSanitizer');
 
@@ -62,12 +62,11 @@ router.get('/export', async (req, res) => {
             buildingsData[building].push(row);
         }
 
-        const wb = xlsx.utils.book_new();
+        const sheetsAoaMap = {};
 
         // Kayıt yoksa boş sayfa üret
         if (Object.keys(buildingsData).length === 0) {
-            const ws = xlsx.utils.json_to_sheet([]);
-            xlsx.utils.book_append_sheet(wb, ws, "Rehber");
+            sheetsAoaMap["Rehber"] = [];
         } else {
             // Her bina için bir sekme oluştur
             for (const building of Object.keys(buildingsData)) {
@@ -93,7 +92,7 @@ router.get('/export', async (req, res) => {
 
                 // Departmansız genel kayıtları en üste yaz
                 for (const entry of generalEntries) {
-                    sheetRows.push([sanitizeCellValue(entry.extension), sanitizeCellValue(entry.name), sanitizeCellValue(entry.job_title)]);
+                    sheetRows.push([entry.extension || '', entry.name || '', entry.job_title || '']);
                 }
 
                 // Her departman grubu için başlık ve kayıtları ekle
@@ -101,20 +100,19 @@ router.get('/export', async (req, res) => {
                     if (sheetRows.length > 1) {
                         sheetRows.push(['', '', '']); // Boş satır
                     }
-                    sheetRows.push(['', sanitizeCellValue(dept), '']); // Departman Başlığı (Sarı satıra denk gelen)
+                    sheetRows.push(['', dept, '']); // Departman Başlığı
                     sheetRows.push(['DAHİLİ', 'İSİM SOY İSİM', 'GÖREV TANIMI']); // Sütun Başlığı
                     
                     for (const entry of depts[dept]) {
-                        sheetRows.push([sanitizeCellValue(entry.extension), sanitizeCellValue(entry.name), sanitizeCellValue(entry.job_title)]);
+                        sheetRows.push([entry.extension || '', entry.name || '', entry.job_title || '']);
                     }
                 }
 
-                const ws = xlsx.utils.aoa_to_sheet(sheetRows);
-                xlsx.utils.book_append_sheet(wb, ws, building.substring(0, 31));
+                sheetsAoaMap[building] = sheetRows;
             }
         }
 
-        const buf = xlsx.write(wb, { type: 'buffer', bookType: 'xlsx' });
+        const buf = await createExcelMultiSheetAoa(sheetsAoaMap);
         
         res.setHeader('Content-Disposition', 'attachment; filename="Dahili_Rehber_Export.xlsx"');
         res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
@@ -197,7 +195,7 @@ router.post('/import', requireRole('operator'), async (req, res) => {
         }
 
         const buffer = Buffer.from(fileData, 'base64');
-        const workbook = xlsx.read(buffer, { type: 'buffer' });
+        const sheets = await readExcelSheetsAoa(buffer);
 
         await client.query('BEGIN');
         
@@ -206,9 +204,9 @@ router.post('/import', requireRole('operator'), async (req, res) => {
 
         let insertCount = 0;
 
-        for (const sheetName of workbook.SheetNames) {
-            const worksheet = workbook.Sheets[sheetName];
-            const rows = xlsx.utils.sheet_to_json(worksheet, { header: 1 });
+        for (const sheet of sheets) {
+            const sheetName = sheet.sheetName;
+            const rows = sheet.rows;
             
             let currentDepartment = '';
 

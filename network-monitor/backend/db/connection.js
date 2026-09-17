@@ -44,106 +44,124 @@ function maskParamsForLog(queryText, params) {
     return params;
 }
 
-let connectionPool = null;
+let defaultWrappedPool = null;
 
-async function getConnection() {
-    if (!connectionPool) {
-        connectionPool = new sql.ConnectionPool(config);
-        connectionPool.on('error', err => {
-            console.error('❌ Unexpected MSSQL pool error:', err);
-        });
-        await connectionPool.connect();
+function createWrappedPool(sqlConfig) {
+    let internalPool = null;
+
+    async function getInternalPool() {
+        if (!internalPool) {
+            internalPool = new sql.ConnectionPool(sqlConfig);
+            internalPool.on('error', err => {
+                console.error('❌ Unexpected MSSQL pool error:', err);
+            });
+            await internalPool.connect();
+        }
+        return internalPool;
     }
-    return connectionPool;
+
+    return {
+        getPool: getInternalPool,
+        close: async () => {
+            if (internalPool) {
+                await internalPool.close();
+                internalPool = null;
+            }
+        },
+        connect: async () => {
+            const poolInst = await getInternalPool();
+            const transaction = new sql.Transaction(poolInst);
+            let inTransaction = false;
+
+            return {
+                query: async (text, params) => {
+                    const upperText = text.trim().toUpperCase();
+                    if (upperText === 'BEGIN' || upperText === 'BEGIN TRANSACTION') {
+                        await transaction.begin();
+                        inTransaction = true;
+                        return { rows: [], rowCount: 0 };
+                    }
+                    if (upperText === 'COMMIT' || upperText === 'COMMIT TRANSACTION') {
+                        if (inTransaction) {
+                            await transaction.commit();
+                            inTransaction = false;
+                        }
+                        return { rows: [], rowCount: 0 };
+                    }
+                    if (upperText === 'ROLLBACK' || upperText === 'ROLLBACK TRANSACTION') {
+                        if (inTransaction) {
+                            await transaction.rollback();
+                            inTransaction = false;
+                        }
+                        return { rows: [], rowCount: 0 };
+                    }
+
+                    const request = inTransaction ? new sql.Request(transaction) : poolInst.request();
+                    
+                    let mssqlText = text;
+                    if (params && params.length > 0) {
+                        params.forEach((param, index) => {
+                            const paramName = `p${index + 1}`;
+                            request.input(paramName, param);
+                        });
+                        mssqlText = mssqlText.replace(/\$(\d+)/g, '@p$1');
+                    }
+                    
+                    try {
+                        const result = await request.query(mssqlText);
+                        return {
+                            rows: result.recordset || [],
+                            rowCount: result.rowsAffected ? result.rowsAffected[0] : 0
+                        };
+                    } catch (error) {
+                        console.error('SQL Error on query:', mssqlText);
+                        console.error('With params:', maskParamsForLog(mssqlText, params));
+                        throw error;
+                    }
+                },
+                release: () => {
+                    if (inTransaction) {
+                        transaction.rollback().catch(() => {});
+                        inTransaction = false;
+                    }
+                }
+            };
+        },
+        query: async (text, params) => {
+            const poolInst = await getInternalPool();
+            const request = poolInst.request();
+            
+            let mssqlText = text;
+            if (params && params.length > 0) {
+                params.forEach((param, index) => {
+                    const paramName = `p${index + 1}`;
+                    request.input(paramName, param);
+                });
+                mssqlText = mssqlText.replace(/\$(\d+)/g, '@p$1');
+            }
+            
+            try {
+                const result = await request.query(mssqlText);
+                return {
+                    rows: result.recordset || [],
+                    rowCount: result.rowsAffected ? result.rowsAffected[0] : 0
+                };
+            } catch (error) {
+                console.error('SQL Error on query:', mssqlText);
+                console.error('With params:', maskParamsForLog(mssqlText, params));
+                throw error;
+            }
+        }
+    };
 }
 
-const pool = {
-    connect: async () => {
-        const poolInst = await getConnection();
-        const transaction = new sql.Transaction(poolInst);
-        let inTransaction = false;
+defaultWrappedPool = createWrappedPool(config);
 
-        return {
-            query: async (text, params) => {
-                const upperText = text.trim().toUpperCase();
-                if (upperText === 'BEGIN' || upperText === 'BEGIN TRANSACTION') {
-                    await transaction.begin();
-                    inTransaction = true;
-                    return { rows: [], rowCount: 0 };
-                }
-                if (upperText === 'COMMIT' || upperText === 'COMMIT TRANSACTION') {
-                    if (inTransaction) {
-                        await transaction.commit();
-                        inTransaction = false;
-                    }
-                    return { rows: [], rowCount: 0 };
-                }
-                if (upperText === 'ROLLBACK' || upperText === 'ROLLBACK TRANSACTION') {
-                    if (inTransaction) {
-                        await transaction.rollback();
-                        inTransaction = false;
-                    }
-                    return { rows: [], rowCount: 0 };
-                }
+async function getConnection() {
+    return defaultWrappedPool.getPool();
+}
 
-                const request = inTransaction ? new sql.Request(transaction) : poolInst.request();
-                
-                let mssqlText = text;
-                if (params && params.length > 0) {
-                    params.forEach((param, index) => {
-                        const paramName = `p${index + 1}`;
-                        request.input(paramName, param);
-                    });
-                    mssqlText = mssqlText.replace(/\$(\d+)/g, '@p$1');
-                }
-                
-                try {
-                    const result = await request.query(mssqlText);
-                    return {
-                        rows: result.recordset || [],
-                        rowCount: result.rowsAffected ? result.rowsAffected[0] : 0
-                    };
-                } catch (error) {
-                    console.error('SQL Error on query:', mssqlText);
-                    console.error('With params:', maskParamsForLog(mssqlText, params));
-                    throw error;
-                }
-            },
-            release: () => {
-                if (inTransaction) {
-                    transaction.rollback().catch(err => {});
-                    inTransaction = false;
-                }
-            }
-        };
-    },
-    query: async (text, params) => {
-        const poolInst = await getConnection();
-        const request = poolInst.request();
-        
-        let mssqlText = text;
-        if (params && params.length > 0) {
-            params.forEach((param, index) => {
-                const paramName = `p${index + 1}`;
-                request.input(paramName, param);
-            });
-            // Replace $1, $2 with @p1, @p2
-            mssqlText = mssqlText.replace(/\$(\d+)/g, '@p$1');
-        }
-        
-        try {
-            const result = await request.query(mssqlText);
-            return {
-                rows: result.recordset || [],
-                rowCount: result.rowsAffected ? result.rowsAffected[0] : 0
-            };
-        } catch (error) {
-            console.error('SQL Error on query:', mssqlText);
-            console.error('With params:', maskParamsForLog(mssqlText, params));
-            throw error;
-        }
-    }
-};
+const pool = defaultWrappedPool;
 
 async function ensureDatabase() {
     if (!adminConfig.password) {
@@ -170,8 +188,8 @@ async function ensureDatabase() {
         }
 
         // Provision non-SA application user for least-privilege runtime access if configured
-        const appUser = process.env.DB_APP_USER;
-        const appPass = process.env.DB_APP_PASSWORD;
+        const appUser = process.env.DB_APP_USER || process.env.DB_USER;
+        const appPass = process.env.DB_APP_PASSWORD || process.env.DB_PASSWORD;
         if (appUser && appPass && appUser.toLowerCase() !== 'sa') {
             if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(appUser)) {
                 throw new Error(`Invalid application database user name: "${appUser}".`);
@@ -180,7 +198,7 @@ async function ensureDatabase() {
             loginReq.input('appUser', sql.VarChar, appUser);
             const loginRes = await loginReq.query(`SELECT 1 FROM sys.server_principals WHERE name = @appUser`);
             if (loginRes.recordset.length === 0) {
-                const safePass = appPass.replace(/'/g, "''");
+                const safePass = String(appPass).replace(/'/g, "''");
                 await adminPool.request().query(`CREATE LOGIN [${appUser}] WITH PASSWORD = '${safePass}', CHECK_POLICY = OFF`);
                 console.log(`✅ Application SQL login "${appUser}" created.`);
             }
@@ -190,12 +208,15 @@ async function ensureDatabase() {
                 IF NOT EXISTS (SELECT 1 FROM sys.database_principals WHERE name = '${appUser}')
                 BEGIN
                     CREATE USER [${appUser}] FOR LOGIN [${appUser}];
-                    ALTER ROLE db_datareader ADD MEMBER [${appUser}];
-                    ALTER ROLE db_datawriter ADD MEMBER [${appUser}];
-                    ALTER ROLE db_ddladmin ADD MEMBER [${appUser}];
+                END
+                ALTER ROLE db_datareader ADD MEMBER [${appUser}];
+                ALTER ROLE db_datawriter ADD MEMBER [${appUser}];
+                IF IS_ROLEMEMBER('db_ddladmin', '${appUser}') = 1
+                BEGIN
+                    ALTER ROLE db_ddladmin DROP MEMBER [${appUser}];
                 END
             `);
-            console.log(`✅ Scoped database user "${appUser}" provisioned on "${dbName}".`);
+            console.log(`✅ Scoped database user "${appUser}" provisioned on "${dbName}" (least-privilege datareader/datawriter).`);
         }
     } catch (err) {
         console.warn('⚠️ Notice during database provisioning:', err.message);
@@ -209,6 +230,9 @@ module.exports = {
     ensureDatabase, 
     sql, 
     getConnection,
+    createWrappedPool,
+    adminConfig,
+    config,
     get poolPromise() {
         return getConnection();
     }

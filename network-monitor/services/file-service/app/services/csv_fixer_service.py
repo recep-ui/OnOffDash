@@ -103,7 +103,8 @@ def fix_csv_file(
     has_header: bool = True,
     clean_empty_rows: bool = True,
     clean_whitespace: bool = True,
-    export_bom: bool = True
+    export_bom: bool = True,
+    user_id: int or str or None = None
 ) -> str:
     # 1. Resolve input encoding
     if in_encoding == "auto":
@@ -141,7 +142,7 @@ def fix_csv_file(
     elif out_encoding == "utf-8-sig":
         actual_out_encoding = "utf-8-sig"
         
-    out_name = generate_unique_filename("csv")
+    out_name = generate_unique_filename("csv", user_id=user_id)
     out_path = os.path.join(OUTPUT_DIR, out_name)
     
     try:

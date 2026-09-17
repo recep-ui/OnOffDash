@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { pool } = require('../db/connection');
-const xlsx = require('xlsx');
+const { readExcelRows, createExcelSingleSheet } = require('../utils/excelHelper');
 const { requireRole } = require('../middleware/auth');
 const { sanitizeRows } = require('../utils/excelSanitizer');
 
@@ -147,11 +147,7 @@ router.get('/export', async (req, res) => {
             return rowData;
         });
 
-        const ws = xlsx.utils.json_to_sheet(sanitizeRows(excelRows));
-        const wb = xlsx.utils.book_new();
-        xlsx.utils.book_append_sheet(wb, ws, "Bakım Tablosu");
-
-        const buf = xlsx.write(wb, { type: 'buffer', bookType: 'xlsx' });
+        const buf = await createExcelSingleSheet("Bakım Tablosu", excelRows);
         res.setHeader('Content-Disposition', 'attachment; filename="Bakim_Tablosu_Export.xlsx"');
         res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         res.send(buf);
@@ -174,10 +170,7 @@ router.post('/import', requireRole('operator'), async (req, res) => {
         }
 
         const buffer = Buffer.from(fileData, 'base64');
-        const workbook = xlsx.read(buffer, { type: 'buffer' });
-        const firstSheetName = workbook.SheetNames[0];
-        const worksheet = workbook.Sheets[firstSheetName];
-        const rawRows = xlsx.utils.sheet_to_json(worksheet);
+        const rawRows = await readExcelRows(buffer);
 
         await client.query("BEGIN");
 

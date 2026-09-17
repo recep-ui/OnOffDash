@@ -24,7 +24,8 @@ def analyze_text_file(file_path: str) -> dict:
 def convert_text_encoding(
     file_path: str,
     in_encoding: str = "auto",
-    out_encoding: str = "utf-8"
+    out_encoding: str = "utf-8",
+    user_id: int or str or None = None
 ) -> str:
     # 1. Resolve input encoding
     if in_encoding == "auto":
@@ -38,7 +39,7 @@ def convert_text_encoding(
         raise ValueError(f"Kaynak dosya okunamadı: {str(e)}")
         
     # 3. Write with target encoding
-    out_name = generate_unique_filename("txt")
+    out_name = generate_unique_filename("txt", user_id=user_id)
     out_path = os.path.join(OUTPUT_DIR, out_name)
     
     try:

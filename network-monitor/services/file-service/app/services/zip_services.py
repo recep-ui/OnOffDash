@@ -23,7 +23,8 @@ def sanitize_filename(filename: str) -> str:
 
 def create_zip_archive(
     file_configs: list[dict], # format: [{"path": str, "name": str}]
-    compression_level: str = "normal"
+    compression_level: str = "normal",
+    user_id: int or str or None = None
 ) -> str:
     # Resolve compression level
     # 0 = ZIP_STORED (no compression), 8 = ZIP_DEFLATED
@@ -36,7 +37,7 @@ def create_zip_archive(
     else:
         compress_level = 6 # normal default
         
-    out_name = generate_unique_filename("zip")
+    out_name = generate_unique_filename("zip", user_id=user_id)
     out_path = os.path.join(OUTPUT_DIR, out_name)
     
     try:

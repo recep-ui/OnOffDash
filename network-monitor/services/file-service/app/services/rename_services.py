@@ -95,7 +95,7 @@ def get_rename_preview(file_names: list[str], rules: dict) -> list[dict]:
         })
     return preview
 
-def apply_bulk_rename(file_configs: list[dict], rules: dict) -> str:
+def apply_bulk_rename(file_configs: list[dict], rules: dict, user_id: int or str or None = None) -> str:
     """
     Renames the uploaded files and packages them into a single ZIP archive.
     file_configs format: [{"path": str, "name": str}]
@@ -130,4 +130,4 @@ def apply_bulk_rename(file_configs: list[dict], rules: dict) -> str:
         })
         
     # Create ZIP archive from renamed paths
-    return create_zip_archive(zip_items)
+    return create_zip_archive(zip_items, user_id=user_id)

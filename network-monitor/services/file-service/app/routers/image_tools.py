@@ -41,7 +41,8 @@ async def resize_image_endpoint(
             height=height,
             keep_aspect=keep_aspect,
             scale_percent=scale_percent,
-            output_format=output_format
+            output_format=output_format,
+            user_id=user_id
         )
         output_size = os.path.getsize(output_path)
         finished_at = datetime.datetime.now()
@@ -103,7 +104,8 @@ async def compress_image_endpoint(
         output_path = image_services.compress_image(
             file_path=file_path,
             quality=quality,
-            output_format=output_format
+            output_format=output_format,
+            user_id=user_id
         )
         output_size = os.path.getsize(output_path)
         finished_at = datetime.datetime.now()
@@ -165,7 +167,8 @@ async def png_to_jpg_endpoint(
         output_path = image_services.convert_png_to_jpg(
             file_path=file_path,
             quality=quality,
-            bg_color_hex=bg_color
+            bg_color_hex=bg_color,
+            user_id=user_id
         )
         output_size = os.path.getsize(output_path)
         finished_at = datetime.datetime.now()
@@ -222,7 +225,7 @@ async def jpg_to_png_endpoint(
         file_path = await save_upload_file(file, {'.jpg', '.jpeg'})
         file_size = os.path.getsize(file_path)
         
-        output_path = image_services.convert_jpg_to_png(file_path=file_path)
+        output_path = image_services.convert_jpg_to_png(file_path=file_path, user_id=user_id)
         output_size = os.path.getsize(output_path)
         finished_at = datetime.datetime.now()
         

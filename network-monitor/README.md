@@ -138,21 +138,29 @@ npm run build:exe
 Tüm testleri çalıştırmak için:
 
 ```bash
-# Backend Testleri (Node test runner)
+# 1. Backend Testleri (41 adet birim ve entegrasyon testi)
 cd network-monitor/backend
 npm test
 
-# Python PDF Servisi Testleri
+# 2. Windows Agent Testleri (12 adet updater ve telemetry testi)
+cd network-monitor/agent
+npm test
+
+# 3. Frontend Testleri ve Derleme (4 adet test + prod build)
+cd network-monitor/frontend
+npm test
+npm run build
+
+# 4. Python PDF Servisi Testleri (5 adet test)
 cd network-monitor/services/pdf-service
 python3 -m unittest discover -s tests -p "test_*.py"
 
-# Python Dosya Servisi Testleri
+# 5. Python Dosya Servisi Testleri (9 adet test - ownership & security)
 cd network-monitor/services/file-service
 python3 -m unittest discover -s tests -p "test_*.py"
 
-# Frontend Derleme Testi
-cd network-monitor/frontend
-npm run build
+# 6. Temiz Docker Deployment Doğrulama
+./network-monitor/scripts/test_clean_docker_install.sh --check-prereqs
 ```
 
 ---

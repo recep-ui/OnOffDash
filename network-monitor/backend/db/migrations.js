@@ -4,21 +4,22 @@ const { pool } = require('./connection');
  * Migration runner with schema_migrations table version tracking.
  * Ensures all migration steps are recorded and executed only once.
  */
-async function runMigrations() {
-    const client = await pool.connect();
+async function runMigrations(customPool = null) {
+    const activePool = customPool || pool;
+    const client = await activePool.connect();
     try {
-        // 0. Ensure schema_migrations table exists
-        await client.query(`
-            IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'schema_migrations')
-            BEGIN
+        // 0. Ensure schema_migrations table exists (check first to avoid DDL error if already present)
+        const tableCheck = await client.query("SELECT 1 FROM sys.tables WHERE name = 'schema_migrations'");
+        if (tableCheck.rows.length === 0) {
+            await client.query(`
                 CREATE TABLE schema_migrations (
                     id          INT IDENTITY(1,1) PRIMARY KEY,
                     version     VARCHAR(100) UNIQUE NOT NULL,
                     description NVARCHAR(255),
                     applied_at  DATETIME2 DEFAULT GETDATE()
                 );
-            END
-        `);
+            `);
+        }
 
         // Helper to check if a migration version has already run
         async function isMigrationApplied(version) {
@@ -350,8 +351,9 @@ async function runMigrations() {
  * Decoupled from schema migrations table so environment variables can be provided
  * or updated on any restart when the users table is empty.
  */
-async function ensureBootstrapAdmin() {
-    const client = await pool.connect();
+async function ensureBootstrapAdmin(customPool = null) {
+    const activePool = customPool || pool;
+    const client = await activePool.connect();
     try {
         const usersCountRes = await client.query('SELECT COUNT(*) as count FROM users');
         const totalUsers = parseInt(usersCountRes.rows[0].count);

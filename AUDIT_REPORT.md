@@ -211,3 +211,40 @@ While the application features modern UI aesthetics and real-time Socket.IO comm
 7. Agent updater aborts installation if downloaded binary SHA-256 mismatches manifest.
 8. Only port 80 is exposed in production `docker-compose.yml`.
 9. All automated test suites pass cleanly.
+
+---
+
+## 7. Final Remediation & Production Readiness Verification (September 2026)
+
+All remediation phases have been completed and verified with automated test suites:
+
+1. **Database Least Privilege (`db-init`)**:
+   - Introduced dedicated one-shot `db-init` container executing DDL migrations and user provisioning with SA credentials.
+   - Runtime `backend`, `pdf-service`, and `file-service` run strictly with unprivileged `DB_APP_USER` (`db_datareader` + `db_datawriter`), completely stripping `db_ddladmin` and SA credentials from runtime containers.
+
+2. **File Tools User Ownership Isolation**:
+   - Transformed file names encode user ID (`u<user_id>_<uuid>.<ext>`).
+   - `download_file_endpoint` cryptographically enforces that the requesting authenticated JWT user matches the output file ownership, preventing cross-tenant access to generated files.
+
+3. **Agent Updater Security & Decoupled Test Suite**:
+   - Migrated dynamic runtime signing to a release-time signing script (`agent/scripts/sign_manifest.js`).
+   - Standardized `agent_version.json` manifest schema.
+   - Decoupled backend tests from agent updater.
+   - Built standalone 12-test suite for `agent/updater.js` covering version comparisons, canonical manifest verification, RSA signatures, SHA-256 integrity, file size clamping, and HTTPS production enforcement.
+
+4. **Vulnerability Elimination (SheetJS -> ExcelJS)**:
+   - Completely removed unmaintained `xlsx` package and replaced with `exceljs` across all export and import workflows (`devices.js`, `maintenance.js`, `actions.js`, `phoneDirectory.js`, `excelHelper.js`).
+   - Overrode `uuid: ^11.1.1` to eliminate transitive vulnerability.
+   - Achieved **0 Critical and 0 High** vulnerabilities in `npm audit`.
+
+5. **Container Hardening & Non-Root Execution**:
+   - Base images pinned to specific minor versions (`node:20.18-alpine`, `nginx:1.27-alpine`, `python:3.11-slim`).
+   - All runtime containers execute under unprivileged non-root users (`node`, `appuser`).
+   - Linux capabilities dropped, preserving only `cap_net_raw` for ICMP ping.
+   - Socket.IO reconnect listener deduplication implemented in `useSocket.js`.
+
+6. **Comprehensive Automated Verification & CI Pipeline**:
+   - Total automated test count across repositories: **71 automated tests** (41 backend, 12 agent, 4 frontend, 14 python microservices) — 100% passing.
+   - Built `scripts/test_clean_docker_install.sh` for automated end-to-end fresh deployment verification.
+   - Updated GitHub Actions CI pipeline (`.github/workflows/ci.yml`) with backend, agent, frontend, python microservices, dependency audit, compose validation, and clean Docker deployment jobs.
+

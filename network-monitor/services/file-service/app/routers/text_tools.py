@@ -82,7 +82,8 @@ async def convert_encoding_endpoint(
         output_path = text_services.convert_text_encoding(
             file_path=file_path,
             in_encoding=in_encoding,
-            out_encoding=out_encoding
+            out_encoding=out_encoding,
+            user_id=user_id
         )
         output_size = os.path.getsize(output_path)
         finished_at = datetime.datetime.now()

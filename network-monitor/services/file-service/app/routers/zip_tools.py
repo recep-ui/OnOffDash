@@ -44,7 +44,8 @@ async def create_zip_endpoint(
             
         output_path = zip_services.create_zip_archive(
             file_configs=saved_items,
-            compression_level=compression_level
+            compression_level=compression_level,
+            user_id=user_id
         )
         output_size = os.path.getsize(output_path)
         finished_at = datetime.datetime.now()

@@ -66,12 +66,9 @@ async def download_file_endpoint(file_id: str, user: dict = Depends(require_auth
         
     user_id = user.get("id")
     role = user.get("role", "")
-    if safe_name.startswith("u"):
-        parts = safe_name.split("_", 1)
-        if len(parts) > 1 and parts[0][1:].isdigit():
-            owner_id = int(parts[0][1:])
-            if role != "admin" and user_id is not None and owner_id != int(user_id):
-                raise HTTPException(status_code=403, detail="Bu dosyayı indirme yetkiniz yok.")
+    from app.utils.file_utils import check_file_ownership
+    if not check_file_ownership(safe_name, user_id=user_id, role=role):
+        raise HTTPException(status_code=403, detail="Bu dosyayı indirme yetkiniz yok.")
 
     return FileResponse(
         file_path,

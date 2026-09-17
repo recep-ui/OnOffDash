@@ -19,8 +19,8 @@ function validateConfig(options = { exitOnError: true }) {
     const agentKey = process.env.AGENT_API_KEY;
     if (!agentKey || typeof agentKey !== 'string') {
         errors.push('AGENT_API_KEY is missing or empty.');
-    } else if (agentKey.trim().length < 16) {
-        errors.push(`AGENT_API_KEY must be at least 16 characters long (current length: ${agentKey.trim().length}).`);
+    } else if (agentKey.trim().length < 32) {
+        errors.push(`AGENT_API_KEY must be at least 32 characters long (current length: ${agentKey.trim().length}).`);
     } else if (isProd && (agentKey.includes('ReplaceWith') || agentKey.includes('changeme'))) {
         errors.push('AGENT_API_KEY uses an insecure placeholder value in production.');
     }

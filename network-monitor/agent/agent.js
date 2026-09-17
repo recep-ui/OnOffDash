@@ -5,10 +5,19 @@ const { execSync } = require('child_process');
 const config = require('./config');
 const { getSystemInfo } = require('./systemInfo');
 const { getSoftwareInventory } = require('./softwareInfo');
-const { checkForUpdate, CURRENT_VERSION } = require('./updater');
+const { checkForUpdate, CURRENT_VERSION, isHttpsRequired } = require('./updater');
 
 let isSending = false;
 let isSendingSoftware = false;
+
+function validateServerUrlSecurity() {
+    if (isHttpsRequired() && config.serverUrl && !config.serverUrl.startsWith('https://')) {
+        console.error(`❌ GÜVENLİK HATASI: Production ortamında sunucu URL'i HTTPS olmak zorundadır! (Verilen: ${config.serverUrl})`);
+        console.error(`   Local development için .env içinde ALLOW_INSECURE_HTTP=true tanımlayabilirsiniz.`);
+        return false;
+    }
+    return true;
+}
 
 function checkAndInstallService() {
     // 1. Argüman kontrolü (--foreground veya --debug varsa pas geç)
@@ -106,6 +115,7 @@ function checkAndInstallService() {
 
 async function sendHeartbeat() {
     if (isSending) return;
+    if (!validateServerUrlSecurity()) return;
     isSending = true;
 
     try {
@@ -139,6 +149,7 @@ async function sendHeartbeat() {
 
 async function sendSoftwareInventory() {
     if (isSendingSoftware) return;
+    if (!validateServerUrlSecurity()) return;
     isSendingSoftware = true;
 
     try {

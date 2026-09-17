@@ -33,8 +33,30 @@ jobs:
           NODE_ENV: test
         run: npm test
 
-  frontend-build:
-    name: Frontend Build
+  agent-tests:
+    name: Agent Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: network-monitor/agent/package-lock.json
+
+      - name: Install Dependencies
+        working-directory: network-monitor/agent
+        run: npm ci
+
+      - name: Run Agent Tests
+        working-directory: network-monitor/agent
+        run: npm test
+
+  frontend-tests:
+    name: Frontend Tests & Build
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
@@ -50,6 +72,10 @@ jobs:
       - name: Install Dependencies
         working-directory: network-monitor/frontend
         run: npm ci
+
+      - name: Run Frontend Tests
+        working-directory: network-monitor/frontend
+        run: npm test
 
       - name: Build Frontend Bundle
         working-directory: network-monitor/frontend
@@ -84,6 +110,22 @@ jobs:
           JWT_SECRET: "ci-pipeline-test-jwt-secret-key-at-least-32-chars-long"
         run: python -m unittest discover -s tests -p "test_*.py"
 
+  dependency-audit:
+    name: Dependency Audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Audit Backend Dependencies
+        working-directory: network-monitor/backend
+        run: npm audit --audit-level=critical
+
   docker-compose-validate:
     name: Validate Docker Compose
     runs-on: ubuntu-latest
@@ -95,14 +137,28 @@ jobs:
         working-directory: network-monitor
         env:
           HOST_PORT: 80
+          ACCEPT_EULA: "Y"
           MSSQL_SA_PASSWORD: "StrongPassword123!"
           DB_NAME: "network_monitor"
           DB_USER: "sa"
           DB_APP_USER: "onoffdash_app"
           DB_APP_PASSWORD: "AppUserStrongPassword123!"
+          BOOTSTRAP_ADMIN_USERNAME: "admin"
+          BOOTSTRAP_ADMIN_PASSWORD: "AdminStrongPassword123!"
           PING_INTERVAL_SECONDS: 60
           HEARTBEAT_TIMEOUT_SECONDS: 90
           RETENTION_DAYS: 30
           JWT_SECRET: "ci-pipeline-test-jwt-secret-key-at-least-32-chars-long"
           AGENT_API_KEY: "ci-pipeline-test-agent-key-at-least-32-chars-long"
         run: docker compose config --quiet
+
+  clean-docker-deployment:
+    name: Clean Docker Deployment Verification
+    runs-on: ubuntu-latest
+    needs: [backend-tests, agent-tests, frontend-tests, python-services-tests, docker-compose-validate]
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Run Clean Docker Deployment Script
+        run: ./network-monitor/scripts/test_clean_docker_install.sh

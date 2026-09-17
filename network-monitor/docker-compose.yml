@@ -15,6 +15,27 @@ services:
       timeout: 5s
       retries: 5
 
+  db-init:
+    build:
+      context: ./backend
+    container_name: network_monitor_db_init
+    restart: "no"
+    command: ["node", "db/init.js"]
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      - DB_HOST=db
+      - DB_PORT=1433
+      - DB_NAME=${DB_NAME:-network_monitor}
+      - DB_ADMIN_USER=${DB_ADMIN_USER:-sa}
+      - DB_ADMIN_PASSWORD=${MSSQL_SA_PASSWORD}
+      - MSSQL_SA_PASSWORD=${MSSQL_SA_PASSWORD}
+      - DB_APP_USER=${DB_APP_USER:-onoffdash_app}
+      - DB_APP_PASSWORD=${DB_APP_PASSWORD}
+      - BOOTSTRAP_ADMIN_USERNAME=${BOOTSTRAP_ADMIN_USERNAME:-admin}
+      - BOOTSTRAP_ADMIN_PASSWORD=${BOOTSTRAP_ADMIN_PASSWORD}
+
   backend:
     build: 
       context: ./backend
@@ -25,19 +46,24 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      db-init:
+        condition: service_completed_successfully
     environment:
+      - NODE_ENV=production
       - DB_HOST=db
       - DB_PORT=1433
-      - DB_NAME=${DB_NAME}
-      - DB_ADMIN_USER=${DB_ADMIN_USER:-sa}
-      - DB_ADMIN_PASSWORD=${MSSQL_SA_PASSWORD}
+      - DB_NAME=${DB_NAME:-network_monitor}
+      - DB_APP_USER=${DB_APP_USER:-onoffdash_app}
+      - DB_APP_PASSWORD=${DB_APP_PASSWORD}
       - DB_USER=${DB_APP_USER:-onoffdash_app}
       - DB_PASSWORD=${DB_APP_PASSWORD}
+      - BOOTSTRAP_ADMIN_USERNAME=${BOOTSTRAP_ADMIN_USERNAME:-admin}
+      - BOOTSTRAP_ADMIN_PASSWORD=${BOOTSTRAP_ADMIN_PASSWORD}
       - SERVER_HOST=0.0.0.0
       - SERVER_PORT=3001
-      - PING_INTERVAL_SECONDS=${PING_INTERVAL_SECONDS}
-      - HEARTBEAT_TIMEOUT_SECONDS=${HEARTBEAT_TIMEOUT_SECONDS}
-      - RETENTION_DAYS=${RETENTION_DAYS}
+      - PING_INTERVAL_SECONDS=${PING_INTERVAL_SECONDS:-60}
+      - HEARTBEAT_TIMEOUT_SECONDS=${HEARTBEAT_TIMEOUT_SECONDS:-90}
+      - RETENTION_DAYS=${RETENTION_DAYS:-30}
       - JWT_SECRET=${JWT_SECRET}
       - AGENT_API_KEY=${AGENT_API_KEY}
       - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost,http://localhost:80}

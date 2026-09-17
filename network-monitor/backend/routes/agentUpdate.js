@@ -26,9 +26,7 @@ function getAgentBinaryInfo() {
     };
 }
 
-const { signManifest } = require('../utils/agentSigner');
-
-// GET /api/agent/version — Güncel agent versiyon ve SHA-256 bütünlük bilgisi
+// GET /api/agent/version — Güncel agent versiyon ve SHA-256 bütünlük bilgisi (Serves pre-signed manifest)
 router.get('/version', authenticateAgent, (req, res) => {
     try {
         let versionData = { version: '1.0.0', minVersion: '1.0.0' };
@@ -42,11 +40,8 @@ router.get('/version', authenticateAgent, (req, res) => {
             versionData.size = versionData.size || binaryInfo.size;
         }
 
-        if (!versionData.signature && versionData.sha256) {
-            const signature = signManifest(versionData);
-            if (signature) {
-                versionData.signature = signature;
-            }
+        if (process.env.NODE_ENV === 'production' && !versionData.signature) {
+            console.warn('⚠️ WARNING: Agent manifest served in production without release-time digital signature.');
         }
 
         res.json(versionData);

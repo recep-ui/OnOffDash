@@ -1,6 +1,9 @@
 {
-    "version": "1.0.0",
-    "minVersion": "1.0.0",
-    "releaseDate": "2026-05-04",
-    "changelog": "İlk sürüm — Sistem bilgisi toplama, heartbeat gönderimi, yazılım envanteri"
+  "version": "1.0.0",
+  "minVersion": "1.0.0",
+  "releaseDate": "2026-09-17",
+  "size": 0,
+  "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "signature": "",
+  "changelog": "OnOffDash V2 Production Release — System telemetry, SNMP printer monitoring, software inventory, self-updater"
 }

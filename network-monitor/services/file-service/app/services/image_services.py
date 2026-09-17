@@ -17,7 +17,8 @@ def resize_image(
     height: int or None = None,
     keep_aspect: bool = True,
     scale_percent: float or None = None,
-    output_format: str = "JPEG"
+    output_format: str = "JPEG",
+    user_id: int or str or None = None
 ) -> str:
     with Image.open(file_path) as img:
         orig_w, orig_h = img.size
@@ -57,7 +58,7 @@ def resize_image(
     else:
         final_img = resized_img
         
-    out_name = generate_unique_filename(out_format.lower())
+    out_name = generate_unique_filename(out_format.lower(), user_id=user_id)
     out_path = os.path.join(OUTPUT_DIR, out_name)
     final_img.save(out_path, format=out_format)
     
@@ -69,7 +70,8 @@ def resize_image(
 def compress_image(
     file_path: str,
     quality: int = 80,
-    output_format: str = "JPEG"
+    output_format: str = "JPEG",
+    user_id: int or str or None = None
 ) -> str:
     with Image.open(file_path) as img:
         out_format = output_format.upper()
@@ -85,7 +87,7 @@ def compress_image(
         else:
             final_img = img.copy()
             
-        out_name = generate_unique_filename(out_format.lower())
+        out_name = generate_unique_filename(out_format.lower(), user_id=user_id)
         out_path = os.path.join(OUTPUT_DIR, out_name)
         
         if out_format == "JPEG":
@@ -103,7 +105,8 @@ def compress_image(
 def convert_png_to_jpg(
     file_path: str,
     quality: int = 80,
-    bg_color_hex: str = "#ffffff"
+    bg_color_hex: str = "#ffffff",
+    user_id: int or str or None = None
 ) -> str:
     with Image.open(file_path) as img:
         bg_rgb = hex_to_rgb(bg_color_hex)
@@ -117,15 +120,15 @@ def convert_png_to_jpg(
         else:
             final_img = img.convert("RGB")
             
-    out_name = generate_unique_filename("jpg")
+    out_name = generate_unique_filename("jpg", user_id=user_id)
     out_path = os.path.join(OUTPUT_DIR, out_name)
     final_img.save(out_path, format="JPEG", quality=quality, optimize=True)
     final_img.close()
     return out_path
 
-def convert_jpg_to_png(file_path: str) -> str:
+def convert_jpg_to_png(file_path: str, user_id: int or str or None = None) -> str:
     with Image.open(file_path) as img:
-        out_name = generate_unique_filename("png")
+        out_name = generate_unique_filename("png", user_id=user_id)
         out_path = os.path.join(OUTPUT_DIR, out_name)
         img.save(out_path, format="PNG", optimize=True)
     return out_path

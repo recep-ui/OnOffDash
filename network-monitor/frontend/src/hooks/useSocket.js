@@ -38,10 +38,11 @@ export function useSocket(tokenParam) {
       console.log('🔌 Socket connected:', socketInstance.id);
       setConnected(true);
 
-      // Re-attach existing event listeners
+      // Re-attach existing event listeners (deduplicating to prevent double-firing on reconnect)
       Object.keys(listenersRef.current).forEach(event => {
         const callback = listenersRef.current[event];
         if (callback) {
+          socketInstance.off(event);
           socketInstance.on(event, callback);
         }
       });

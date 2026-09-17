@@ -94,7 +94,8 @@ async def fix_csv_endpoint(
             has_header=has_header,
             clean_empty_rows=clean_empty_rows,
             clean_whitespace=clean_whitespace,
-            export_bom=export_bom
+            export_bom=export_bom,
+            user_id=user_id
         )
         output_size = os.path.getsize(output_path)
         finished_at = datetime.datetime.now()

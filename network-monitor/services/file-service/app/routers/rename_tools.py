@@ -68,7 +68,8 @@ async def rename_apply_endpoint(
             
         output_path = rename_services.apply_bulk_rename(
             file_configs=saved_items,
-            rules=rules_dict
+            rules=rules_dict,
+            user_id=user_id
         )
         output_size = os.path.getsize(output_path)
         finished_at = datetime.datetime.now()
