@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
+    "lint": "node -e \"const fs = require('fs'); ['server.js', ...fs.readdirSync('services').map(f => 'services/' + f), ...fs.readdirSync('routes').map(f => 'routes/' + f), ...fs.readdirSync('middleware').map(f => 'middleware/' + f)].forEach(f => { require('child_process').execSync('node --check ' + f); }); console.log('All backend JS syntax valid');\"",
     "test": "node --test"
   },
   "dependencies": {
