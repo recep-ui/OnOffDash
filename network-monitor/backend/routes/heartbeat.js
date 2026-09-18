@@ -23,9 +23,11 @@ router.post('/', authenticateAgent, async (req, res) => {
         }
 
         // 1. Mevcut durumu kontrol et (yalnızca durum değiştiğinde log kaydı oluşturmak için)
-        const existingRes = await pool.query('SELECT id, status FROM devices WHERE ip_address = $1', [ip_address]);
+        const existingRes = await pool.query('SELECT id, status, agent_status FROM devices WHERE ip_address = $1', [ip_address]);
         const previousStatus = existingRes.rows.length > 0 ? existingRes.rows[0].status : null;
-        const isTransition = previousStatus !== 'online';
+        const previousAgentStatus = existingRes.rows.length > 0 ? existingRes.rows[0].agent_status : 'offline';
+        const isTransition = existingRes.rows.length === 0 || (previousStatus && previousStatus !== 'online');
+        const isAgentTransition = previousAgentStatus !== 'online';
 
         // 2. Cihazı bul veya oluştur (upsert)
         const deviceResult = await pool.query(
@@ -39,12 +41,13 @@ router.post('/', authenticateAgent, async (req, res) => {
                      os_name = COALESCE(source.os_name, target.os_name),
                      username = COALESCE(source.username, target.username),
                      agent_installed = 1,
-                     status = 'online',
+                     agent_status = 'online',
+                     last_heartbeat_at = GETDATE(),
                      last_seen = GETDATE(),
                      updated_at = GETDATE()
              WHEN NOT MATCHED THEN
-                 INSERT (hostname, ip_address, mac_address, os_name, username, agent_installed, status, last_seen, updated_at)
-                 VALUES (source.hostname, source.ip_address, source.mac_address, source.os_name, source.username, 1, 'online', GETDATE(), GETDATE())
+                 INSERT (hostname, ip_address, mac_address, os_name, username, agent_installed, agent_status, status, last_heartbeat_at, last_seen, updated_at)
+                 VALUES (source.hostname, source.ip_address, source.mac_address, source.os_name, source.username, 1, 'online', 'online', GETDATE(), GETDATE(), GETDATE())
              OUTPUT INSERTED.*;`,
             [hostname, ip_address, mac_address || null, os_name || '', username || '']
         );
@@ -67,15 +70,34 @@ router.post('/', authenticateAgent, async (req, res) => {
             );
         }
 
-        // 5. Socket.IO ile canlı güncelleme
+        // 5. Socket.IO ile canlı güncelleme (Kanonik Kontrat)
         const io = req.app.get('io');
         if (io) {
             io.emit('device:updated', device);
             if (isTransition) {
                 io.emit('device:statusChanged', {
-                    device,
+                    device: {
+                        id: device.id,
+                        hostname: device.hostname,
+                        ip_address: device.ip_address
+                    },
                     oldStatus: previousStatus || 'unknown',
-                    newStatus: 'online'
+                    newStatus: 'online',
+                    reason: null,
+                    timestamp: new Date().toISOString()
+                });
+            }
+            if (isAgentTransition) {
+                io.emit('agent:statusChanged', {
+                    device: {
+                        id: device.id,
+                        hostname: device.hostname,
+                        ip_address: device.ip_address
+                    },
+                    oldStatus: previousAgentStatus || 'offline',
+                    newStatus: 'online',
+                    reason: null,
+                    timestamp: new Date().toISOString()
                 });
             }
             io.emit('heartbeat:received', {

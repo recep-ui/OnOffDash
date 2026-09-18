@@ -59,56 +59,51 @@ class PingService {
                     newStatus = 'online';
                 }
             } else {
-                // Agent kurulu cihazlarda, heartbeat varsa çevrimiçi kalabilir
-                if (device.agent_installed) {
-                    const timeoutSeconds = parseInt(process.env.HEARTBEAT_TIMEOUT_SECONDS || '90');
-                    const lastSeen = device.last_seen ? new Date(device.last_seen) : null;
-                    const now = new Date();
-
-                    if (lastSeen && (now - lastSeen) / 1000 < timeoutSeconds) {
-                        newStatus = 'online';
-                    } else {
-                        newStatus = 'offline';
-                    }
-                } else {
-                    newStatus = 'offline';
-                }
+                newStatus = 'offline';
             }
 
-            const lastSeenValue = newStatus === 'online' ? new Date() : (device.last_seen ? new Date(device.last_seen) : null);
+            const isTransition = (device.status !== newStatus);
 
-            // Veritabanını güncelle
+            // Veritabanını güncelle (last_ping_at her ping taramasında güncellenir, last_seen geriye uyumluluk için online ise yenilenir)
             const updateResult = await pool.query(
                 `UPDATE devices SET
                     status = $1,
                     ping_ms = $2,
-                    last_seen = COALESCE($3, last_seen),
+                    last_ping_at = GETDATE(),
+                    last_seen = CASE WHEN $1 = 'online' THEN GETDATE() ELSE last_seen END,
                     updated_at = GETDATE()
                  OUTPUT INSERTED.*
-                 WHERE id = $4`,
-                [newStatus, pingMs, lastSeenValue, device.id]
+                 WHERE id = $3`,
+                [newStatus, pingMs, device.id]
             );
 
-            // Durum log kaydı
-            await pool.query(
-                `INSERT INTO device_status_logs (device_id, status, response_time_ms)
-                 VALUES ($1, $2, $3)`,
-                [device.id, newStatus, pingMs]
-            );
+            // Durum log kaydı: YALNIZCA gerçek bir durum değişikliği (transition) olduğunda yazılır
+            // Tekrarlanan aynı durumlar (online->online, offline->offline) için log kaydı ATILMAZ
+            if (isTransition) {
+                await pool.query(
+                    `INSERT INTO device_status_logs (device_id, status, response_time_ms, checked_at)
+                     VALUES ($1, $2, $3, GETDATE())`,
+                    [device.id, newStatus, pingMs]
+                );
 
-            // Durum değişikliği varsa Socket.IO ile bildir
-            if (device.status !== newStatus && updateResult.rows.length > 0) {
-                this.io.emit('device:updated', updateResult.rows[0]);
-                this.io.emit('device:statusChanged', {
-                    device_id: device.id,
-                    hostname: device.hostname,
-                    oldStatus: device.status,
-                    newStatus: newStatus,
-                    timestamp: new Date().toISOString()
-                });
-                console.log(`   📡 ${device.hostname} (${device.ip_address}): ${device.status} → ${newStatus}`);
+                // Socket.IO ile standart kanonik kontrat ile bildir
+                if (updateResult.rows.length > 0) {
+                    const updatedDevice = updateResult.rows[0];
+                    this.io.emit('device:updated', updatedDevice);
+                    this.io.emit('device:statusChanged', {
+                        device: {
+                            id: updatedDevice.id,
+                            hostname: updatedDevice.hostname,
+                            ip_address: updatedDevice.ip_address
+                        },
+                        oldStatus: device.status,
+                        newStatus: newStatus,
+                        reason: null,
+                        timestamp: new Date().toISOString()
+                    });
+                    console.log(`   📡 ${device.hostname} (${device.ip_address}): ${device.status} → ${newStatus}`);
+                }
             }
-
         } catch (err) {
             console.error(`   ❌ Ping failed for ${device.hostname} (${device.ip_address}):`, err.message);
         }
@@ -118,28 +113,33 @@ class PingService {
         const timeoutSeconds = parseInt(process.env.HEARTBEAT_TIMEOUT_SECONDS || '90');
 
         try {
+            // Heartbeat timeout kontrolü: Yalnızca last_heartbeat_at alanını kontrol eder
+            // Ping'den bağımsız olarak agent_status sütununu günceller
             const result = await pool.query(
                 `UPDATE devices SET
-                    status = 'offline',
+                    agent_status = 'offline',
                     updated_at = GETDATE()
                  OUTPUT INSERTED.*
                  WHERE agent_installed = 1
-                   AND status = 'online'
-                   AND last_seen < DATEADD(second, -$1, GETDATE())`,
+                   AND agent_status = 'online'
+                   AND (last_heartbeat_at IS NULL OR last_heartbeat_at < DATEADD(second, -$1, GETDATE()))`,
                 [timeoutSeconds]
             );
 
             for (const device of result.rows) {
                 this.io.emit('device:updated', device);
-                this.io.emit('device:statusChanged', {
-                    device_id: device.id,
-                    hostname: device.hostname,
+                this.io.emit('agent:statusChanged', {
+                    device: {
+                        id: device.id,
+                        hostname: device.hostname,
+                        ip_address: device.ip_address
+                    },
                     oldStatus: 'online',
                     newStatus: 'offline',
                     reason: 'heartbeat_timeout',
                     timestamp: new Date().toISOString()
                 });
-                console.log(`   ⏰ ${device.hostname}: heartbeat timeout → offline`);
+                console.log(`   ⏰ ${device.hostname}: agent heartbeat timeout → agent offline`);
             }
         } catch (err) {
             console.error('❌ Heartbeat timeout check error:', err.message);

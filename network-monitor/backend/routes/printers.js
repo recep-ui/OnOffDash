@@ -674,10 +674,17 @@ router.delete('/toners/replacements/:id', requireRole('admin'), async (req, res)
 // POST /api/printers/scan — SNMP ve Web ile yazıcıları tarama tetikle
 router.post('/scan', requireRole('operator'), async (req, res) => {
     try {
-        const app = req.app;
-        const io = app.get('io');
-        const PrinterMonitorService = require('../services/printerMonitorService');
-        const monitor = new PrinterMonitorService(io);
+        let monitor = req.app.get('printerMonitorService');
+        if (!monitor) {
+            const io = req.app.get('io');
+            const PrinterMonitorService = require('../services/printerMonitorService');
+            monitor = new PrinterMonitorService(io);
+            req.app.set('printerMonitorService', monitor);
+        }
+
+        if (monitor.isScanning) {
+            return res.status(409).json({ error: 'Tarama zaten devam ediyor (Scan already running)' });
+        }
         
         // Arka planda taramayı başlat (HTTP yanıtını bloke etmesin)
         monitor.scanAllPrinters();

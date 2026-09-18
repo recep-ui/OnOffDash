@@ -85,11 +85,14 @@ export default function NotificationProvider({ socket, children }) {
 
         // Cihaz offline oldu
         const handleDeviceStatusChanged = (data) => {
-            if (data.newStatus === 'offline' && data.oldStatus === 'online') {
-                const key = `offline-${data.device?.id}`;
+            if (data && data.newStatus === 'offline' && data.oldStatus === 'online') {
+                const deviceId = data.device?.id ?? data.device_id;
+                if (deviceId === undefined || deviceId === null) return;
+
+                const key = `offline-${deviceId}`;
                 if (!shouldNotify(key)) return;
 
-                const hostname = data.device?.hostname || data.device?.ip_address || 'Bilinmeyen';
+                const hostname = data.device?.hostname || data.hostname || data.device?.ip_address || 'Bilinmeyen';
                 playAlert();
                 showToast('error', '🔴 Cihaz Çevrimdışı', `${hostname} cihazı çevrimdışı oldu`);
                 showPushNotification('Cihaz Çevrimdışı', `${hostname} cihazı çevrimdışı oldu`);

@@ -47,8 +47,11 @@ async function runMigrations(customPool = null) {
                         username        VARCHAR(100) DEFAULT '',
                         notes           NVARCHAR(MAX) DEFAULT '',
                         agent_installed BIT DEFAULT 0,
+                        agent_status    VARCHAR(20) DEFAULT 'offline',
                         status          VARCHAR(20) DEFAULT 'offline',
                         last_seen       DATETIME2,
+                        last_ping_at    DATETIME2,
+                        last_heartbeat_at DATETIME2,
                         ping_ms         INTEGER,
                         created_at      DATETIME2 DEFAULT GETDATE(),
                         updated_at      DATETIME2 DEFAULT GETDATE()
@@ -335,6 +338,37 @@ async function runMigrations(customPool = null) {
                     CREATE INDEX idx_status_logs_device_time ON device_status_logs(device_id, checked_at DESC);
             `);
             await recordMigration('007_performance_composite_indices', 'Composite indices for rapid telemetry queries');
+        }
+
+        // --- 008: Separate Ping and Heartbeat Fields ---
+        if (!await isMigrationApplied('008_separate_ping_heartbeat')) {
+            await client.query(`
+                IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('devices') AND name = 'last_ping_at')
+                BEGIN
+                    ALTER TABLE devices ADD 
+                        last_ping_at DATETIME2,
+                        last_heartbeat_at DATETIME2,
+                        agent_status VARCHAR(20) DEFAULT 'offline';
+                END
+
+                -- Safe backfill for existing records without destroying data
+                UPDATE devices 
+                SET last_ping_at = COALESCE(last_ping_at, last_seen),
+                    last_heartbeat_at = COALESCE(last_heartbeat_at, CASE WHEN agent_installed = 1 THEN last_seen ELSE NULL END),
+                    agent_status = CASE 
+                        WHEN agent_installed = 1 AND last_seen IS NOT NULL AND DATEDIFF(second, last_seen, GETDATE()) < 90 THEN 'online'
+                        ELSE 'offline'
+                    END
+                WHERE last_ping_at IS NULL;
+
+                IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_devices_agent_status') 
+                    CREATE INDEX idx_devices_agent_status ON devices(agent_status);
+                IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_devices_last_heartbeat') 
+                    CREATE INDEX idx_devices_last_heartbeat ON devices(last_heartbeat_at);
+                IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_devices_last_ping') 
+                    CREATE INDEX idx_devices_last_ping ON devices(last_ping_at);
+            `);
+            await recordMigration('008_separate_ping_heartbeat', 'Separate ping and agent heartbeat timestamps with agent_status column');
         }
 
         console.log('✅ All database schema migrations verified and up to date.');

@@ -166,6 +166,7 @@ async function startServer() {
 
         // 5. Printer Monitor servisini başlat
         const printerMonitorService = new PrinterMonitorService(io);
+        app.set('printerMonitorService', printerMonitorService);
 
         // 6. Periyodik yazıcı taraması (Her 5 dakikada bir)
         cron.schedule('*/5 * * * *', () => {
