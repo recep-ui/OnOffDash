@@ -17,12 +17,12 @@ OnOffDash_V2/
 ├── SECURITY_MIGRATION.md          # Credential rotation and sanitization guide
 ├── PRODUCTION_CHECKLIST.md        # Pre-deployment production readiness verification
 └── network-monitor/               # Core Application
-    ├── backend/                   # Node.js / Express / Socket.IO / MSSQL API (93 tests)
+    ├── backend/                   # Node.js / Express / Socket.IO / MSSQL API (102 tests across 14 suites)
     ├── frontend/                  # React 19 / Vite Dashboard (23 Vitest component tests)
     ├── agent/                     # Windows Client Agent & Auto-Updater (12 tests)
     ├── services/
-    │   ├── pdf-service/           # FastAPI PDF Tools Microservice (8 tests)
-    │   └── file-service/          # FastAPI File & Image Tools Microservice (12 tests)
+    │   ├── pdf-service/           # FastAPI PDF Tools Microservice (9 tests)
+    │   └── file-service/          # FastAPI File & Image Tools Microservice (13 tests)
     ├── docker-compose.yml         # Local HTTP development compose setup
     ├── docker-compose.prod.yml    # Production HTTPS / TLS compose override
     └── docs/archive/              # Archived legacy planning and audit documents

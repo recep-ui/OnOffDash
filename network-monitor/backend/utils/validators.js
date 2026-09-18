@@ -68,7 +68,7 @@ function validateHeartbeatPayload(data) {
         return { valid: false, error: 'Request body must be a JSON object' };
     }
 
-    const { hostname, ip_address, mac_address, cpu_usage, ram_usage, disk_usage, uptime_seconds } = data;
+    const { hostname, ip_address, mac_address, os_name, username, cpu_usage, ram_usage, disk_usage, uptime_seconds } = data;
 
     if (!hostname || typeof hostname !== 'string' || hostname.trim().length === 0 || hostname.trim().length > 255 || !isValidHostname(hostname.trim())) {
         return { valid: false, error: 'Invalid or missing hostname (must be a valid RFC hostname up to 255 characters)' };
@@ -80,6 +80,18 @@ function validateHeartbeatPayload(data) {
 
     if (mac_address && (typeof mac_address !== 'string' || !isValidMAC(mac_address.trim()))) {
         return { valid: false, error: 'Invalid mac_address format' };
+    }
+
+    if (os_name !== undefined && os_name !== null) {
+        if (typeof os_name !== 'string' || os_name.length > 100) {
+            return { valid: false, error: 'os_name must be a string up to 100 characters' };
+        }
+    }
+
+    if (username !== undefined && username !== null) {
+        if (typeof username !== 'string' || username.length > 100) {
+            return { valid: false, error: 'username must be a string up to 100 characters' };
+        }
     }
 
     for (const [metric, val] of Object.entries({ cpu_usage, ram_usage, disk_usage })) {

@@ -13,8 +13,9 @@
 ## 1. Security Architecture & Threat Model
 
 ### 1.1 Authentication & Session Lifecycle
-* **Short-Lived Access Tokens**: JWT access tokens are valid for 30 minutes. An authenticated `/api/auth/refresh` endpoint manages session renewals.
-* **Server-Side Session Invalidation (`token_version`)**: In-memory and persistent `token_version` tracking guarantees instant token invalidation when:
+* **Short-Lived In-Memory Access Tokens**: JWT access tokens are valid for 15 minutes and held exclusively in React JavaScript heap memory. Access tokens are **never stored in `localStorage` or `sessionStorage`** to prevent token theft via XSS.
+* **HttpOnly Refresh Cookies**: Long-lived refresh sessions are managed via `HttpOnly`, `SameSite=Strict`, `Secure` cookies with database rotation tracking (`user_refresh_tokens`). The `/api/auth/refresh` endpoint silently rotates refresh tokens and issues fresh in-memory access tokens.
+* **Persistent Session Invalidation (`token_version`)**: Authoritative session validation is backed by `users.token_version` in MSSQL. Shared verification (`verifyAccessToken`) is enforced across both REST endpoints and Socket.IO connection handshakes. Tokens are permanently invalidated across server restarts and multi-instance deployments when:
   - A user changes their password.
   - An administrator modifies a user's RBAC role.
   - A user account is deleted.
@@ -22,7 +23,8 @@
 
 ### 1.2 Agent Identity & Telemetry Security
 * **Per-Device Hashed Credentials**: Supports unique per-agent credentials (`agk_<keyId>.<secret>`). Secrets are stored only as SHA-256 hashes in `agent_credentials`. Verification uses constant-time comparison (`crypto.timingSafeEqual`).
-* **Cross-Device Telemetry Prevention**: Authenticated agents cannot report telemetry for other endpoints; the backend binds telemetry submissions to the authenticated device ID.
+* **Authoritative Device Binding**: When per-device credentials are used, the authenticated device ID is authoritative. Telemetry submissions matching non-existent or conflicting device IPs are strictly rejected with `403 Forbidden`, closing device impersonation gaps and preventing unauthorized device creation.
+* **Bounded Payload Strings**: Heartbeat optional strings (`os_name`, `username`) are strictly bounded to database column lengths (<= 100 chars) to prevent multi-megabyte payload abuse.
 * **Backward Compatibility**: Legacy `AGENT_API_KEY` is supported during transition with a deprecation warning header (`X-Agent-Auth-Warning`).
 
 ### 1.3 Windows Agent Updater Security
@@ -43,7 +45,7 @@
   - Formula injection mitigation (CWE-1236) on all Excel/CSV exports (`sanitizeCell`).
 
 ### 1.6 Microservices Security (PDF & File Tools)
-* **JWT Claim Validation**: Tokens must include valid `id` (or `sub`), `role`, and expiration `exp`.
+* **Enforced JWT Claim Validation**: PyJWT strictly enforces required expiration (`options={"require": ["exp"]}`) as well as identity (`id` or `sub`) and `role` claims. Missing expiration or identity attributes results in immediate HTTP 401 rejection.
 * **Information Leakage Prevention**: Python services return generic JSON error responses with unique `request_id`s, suppressing internal exception traces from client responses.
 
 ---

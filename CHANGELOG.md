@@ -4,6 +4,63 @@ All notable changes and architectural/security improvements across OnOffDash V2 
 
 ---
 
+## [2.2.0] - September 2026
+
+### P0 — Broken XLSX Dependency Removal & ExcelJS Migration
+- Completely removed `require('xlsx')` from `routes/printers.js`.
+- Migrated all Excel import and export endpoints (printers, toner stock, toner replacements) to use `exceljs` via `utils/excelHelper.js`.
+- Preserved Turkish column normalization, formula injection protections (CWE-1236), upload bounds, and error handling.
+- Backend boots cleanly after `npm ci` without missing spreadsheet modules.
+
+### P1 — Decoupled Heartbeat vs Network Reachability Architecture
+- Strict separation between network reachability (`devices.status`) and agent health (`devices.agent_status`).
+- Agent heartbeat route manages `agent_installed`, `agent_status`, `last_heartbeat_at`, and emits `agent:statusChanged`.
+- Heartbeat does NOT mutate network reachability or falsely emit `device:statusChanged`.
+- `PingService` remains solely responsible for ICMP reachability and network status transitions.
+- Newly enrolled devices default to `offline` network state until verified by ICMP ping.
+
+### P1 — Per-Device Agent Credential Binding & Hardened Enrollment
+- Per-device credentials (`agk_<keyId>.<secret>`) strictly bind telemetry to `authenticatedDeviceId`.
+- Validates submitted IP address against the device record; rejects attempts to report telemetry for unknown or mismatching IPs with `403 Forbidden`.
+- Hardened `POST /api/agent/enroll` with integer validation, IP syntax checks, rotation support (`rotate: true`), and audit logging.
+- Added `GET /api/agent/credentials` for operator inspection of credential metadata without exposing key secrets or hashes.
+- Bounded optional heartbeat string fields (`os_name`, `username` <= 100 chars).
+
+### P1 — Persistent JWT Revocation & Shared Socket.IO Authorization
+- Migrated token invalidation to persistent `users.token_version` stored in MSSQL.
+- Token invalidation survives server restarts, process crashes, and multi-instance deployments.
+- Created shared `verifyAccessToken` function used identically by Express middleware and Socket.IO handshake authentication.
+- Invalidates active sessions upon password changes, admin role modifications, or user account deletion.
+
+### P1/P2 — HttpOnly Refresh Session Architecture & In-Memory Access Tokens
+- Replaced `localStorage` access token storage with in-memory React state and automatic silent refresh.
+- Access tokens are short-lived (15 minutes) and stored only in memory.
+- Refresh tokens are stored in `HttpOnly`, `SameSite=Strict`, `Secure` cookies with database rotation tracking (`user_refresh_tokens`).
+- Logout clears server-side refresh sessions and browser memory.
+
+### P2 — Python JWT Claim Enforcement
+- Configured PyJWT decoding with explicit `options={"require": ["exp"]}` across `pdf-service` and `file-service`.
+- Rejects tokens lacking expiration or standard identity claims (`id`/`sub`, `role`) with HTTP 401.
+
+### P2 — CIDR-Aware IPAM Subnet Calculations
+- Replaced all legacy `/24` assumptions and string-based octet parsing in `routes/ipam.js` with 32-bit integer arithmetic (`ipToLong`, `longToIp`).
+- Full support for arbitrary IPv4 CIDR blocks (`/22`, `/23`, `/24`, `/25`, `/26`, `/30`, `/31`, `/32`).
+- `/suggest` generates available hosts across entire multi-octet subnets (e.g. `10.0.80.0/23` spanning both `10.0.80.x` and `10.0.81.x`).
+- Added explicit controlled HTTP 400 rejection for unsupported IPv6 queries.
+
+### P2 — Real Backend HTTP Route Testing & Startup Smoke Tests
+- Replaced synthetic Express test reimplementations in `tests/http_routes.test.js` with real production route integration tests.
+- Real routes execute against dynamic HTTP ports and a high-fidelity SQL mock engine.
+- Added `tests/startup_smoke.test.js` verifying clean imports of `server.js` and all registered routers.
+
+### P2 — DevSecOps & Enforced CI Pipeline
+- Enforced Python `pip-audit` vulnerability scanning in `.github/workflows/ci.yml` without bypasses.
+- Added ESLint to frontend (React, hooks, browser globals) and backend (Node.js, promises).
+- Added Gitleaks secret scanning and Trivy container vulnerability scanning for all 4 microservice images.
+- Decoupled runtime backend startup from SA database provisioning; runtime backend operates under least-privilege `onoffdash_app`.
+
+---
+
 ## [2.1.0] - September 2026
 
 ### Phase 1 — Correctness

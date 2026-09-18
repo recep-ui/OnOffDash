@@ -1,8 +1,11 @@
+import { AuthProvider } from './context/AuthContext'
 import Dashboard from './components/Dashboard'
 
 function App() {
   return (
-    <Dashboard />
+    <AuthProvider>
+      <Dashboard />
+    </AuthProvider>
   )
 }
 

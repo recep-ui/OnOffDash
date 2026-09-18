@@ -14,9 +14,12 @@ This document outlines the planned future enhancements and architectural evoluti
 - **Dual-Stack Subnet Tracking**: Extend `ipamUtils.js` to parse IPv6 `/64` subnets, calculate prefix allocations, and monitor EUI-64 and SLAAC device addresses.
 - **IPv6 Conflict Detection**: Detect duplicated link-local and global unicast addresses across managed networks.
 
-### Cookie-Based Session Migration (Phase B)
-- **HttpOnly Refresh Cookies**: Migrate JWT refresh tokens completely into `HttpOnly`, `SameSite=Strict`, `Secure` cookies with anti-CSRF double-submit protection.
-- **In-Memory Access Tokens**: Maintain access tokens strictly in JavaScript heap memory, eliminating `localStorage` token persistence entirely.
+### Cookie-Based Session Migration (Completed in v2.2.0)
+- **HttpOnly Refresh Cookies**: JWT refresh tokens managed via `HttpOnly`, `SameSite=Strict`, `Secure` cookies with database rotation tracking (`user_refresh_tokens`).
+- **In-Memory Access Tokens**: Access tokens kept strictly in React JavaScript heap memory, eliminating `localStorage` token persistence entirely.
+
+### Asymmetric Token Signing (RS256 / EdDSA)
+- **Public-Key Token Verification**: Migrate from shared symmetric `JWT_SECRET` to private key signing at the Node.js backend with public key verification at Python microservices (`pdf-service`, `file-service`).
 
 ### Multi-Tenant & RBAC Granularity
 - **Site / Department Scoping**: Enable operators to be scoped to specific departments or physical buildings.

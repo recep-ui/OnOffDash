@@ -1,3 +1,4 @@
+import { getAccessToken } from '../../services/api';
 import { useState } from 'react';
 import FileDropzone from '../../components/file-tools/FileDropzone';
 import { useNotification } from '../../components/NotificationProvider';
@@ -34,7 +35,7 @@ export default function CsvFixerPage({ onBack }) {
     const formData = new FormData();
     formData.append('file', targetFile);
 
-    const token = localStorage.getItem('token');
+    const token = getAccessToken();
     const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
 
     try {
@@ -86,7 +87,7 @@ export default function CsvFixerPage({ onBack }) {
     formData.append('export_bom', exportBom ? 'true' : 'false');
     formData.append('has_header', 'true');
 
-    const token = localStorage.getItem('token');
+    const token = getAccessToken();
     const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
 
     try {

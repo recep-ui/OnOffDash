@@ -21,33 +21,22 @@ import PdfToolsDashboard from '../pages/pdf-tools/PdfToolsDashboard';
 import FileToolsDashboard from '../pages/file-tools/FileToolsDashboard';
 import ConfirmDialog from './ui/ConfirmDialog';
 import ForceChangePassword from './ForceChangePassword';
+import { useAuth } from '../context/AuthContext';
 
 export default function Dashboard() {
-  const [token, setToken] = useState(() => localStorage.getItem('token') || null);
-  const [user, setUser] = useState(() => {
-    try {
-      const saved = localStorage.getItem('user');
-      return saved ? JSON.parse(saved) : null;
-    } catch {
-      return null;
-    }
-  });
-
+  const { token, user, login: handleLogin, logout: handleLogout, loading } = useAuth();
   const { connected, on, off, socket } = useSocket(token);
 
-  const handleLogin = (newToken, newUser) => {
-    localStorage.setItem('token', newToken);
-    localStorage.setItem('user', JSON.stringify(newUser));
-    setToken(newToken);
-    setUser(newUser);
-  };
-
-  const handleLogout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
-    setToken(null);
-    setUser(null);
-  };
+  if (loading) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', backgroundColor: '#0f172a', color: '#94a3b8' }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ width: '36px', height: '36px', border: '3px solid #6366f1', borderTopColor: 'transparent', borderRadius: '50%', margin: '0 auto 16px auto', animation: 'spin 1s linear infinite' }} />
+          <p style={{ fontSize: '14px', margin: 0 }}>Oturum doğrulanıyor...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <NotificationProvider socket={socket}>

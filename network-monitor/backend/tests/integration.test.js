@@ -11,6 +11,7 @@ const {
     sanitizePagination 
 } = require('../utils/validators');
 
+process.env.NODE_ENV = 'test';
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'this-is-a-test-jwt-secret-key-at-least-32-chars-long';
 process.env.AGENT_API_KEY = process.env.AGENT_API_KEY || 'this-is-a-test-agent-key-at-least-32-chars-long';
 

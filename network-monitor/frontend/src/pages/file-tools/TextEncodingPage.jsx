@@ -1,3 +1,4 @@
+import { getAccessToken } from '../../services/api';
 import { useState } from 'react';
 import FileDropzone from '../../components/file-tools/FileDropzone';
 import { useNotification } from '../../components/NotificationProvider';
@@ -29,7 +30,7 @@ export default function TextEncodingPage({ onBack }) {
     const formData = new FormData();
     formData.append('file', targetFile);
 
-    const token = localStorage.getItem('token');
+    const token = getAccessToken();
     const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
 
     try {
@@ -71,7 +72,7 @@ export default function TextEncodingPage({ onBack }) {
     formData.append('in_encoding', inEncoding);
     formData.append('out_encoding', outEncoding);
 
-    const token = localStorage.getItem('token');
+    const token = getAccessToken();
     const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
 
     try {

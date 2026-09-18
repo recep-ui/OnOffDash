@@ -1,3 +1,4 @@
+import { getAccessToken } from '../../services/api';
 import { useState } from 'react';
 import FileDropzone from '../../components/pdf/FileDropzone';
 import { useNotification } from '../../components/NotificationProvider';
@@ -31,7 +32,7 @@ export default function CompressPdfPage({ onBack }) {
     formData.append('file', file);
     formData.append('quality', quality);
 
-    const token = localStorage.getItem('token');
+    const token = getAccessToken();
     const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
 
     try {

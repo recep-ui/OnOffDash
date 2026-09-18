@@ -413,6 +413,50 @@ async function runMigrations(customPool = null) {
             await recordMigration('010_user_token_version', 'Token version column for instant server-side JWT session invalidation');
         }
 
+        // --- 011: Persistent Refresh Sessions & Audit Logs ---
+        if (!await isMigrationApplied('011_refresh_tokens_and_audit')) {
+            await client.query(`
+                IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'user_refresh_tokens')
+                BEGIN
+                    CREATE TABLE user_refresh_tokens (
+                        id              INT IDENTITY(1,1) PRIMARY KEY,
+                        user_id         INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                        token_hash      VARCHAR(255) NOT NULL,
+                        token_version   INT DEFAULT 1,
+                        expires_at      DATETIME2 NOT NULL,
+                        created_at      DATETIME2 DEFAULT GETDATE(),
+                        revoked_at      DATETIME2
+                    );
+                END
+
+                IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_user_refresh_tokens_hash')
+                    CREATE INDEX idx_user_refresh_tokens_hash ON user_refresh_tokens(token_hash);
+                IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_user_refresh_tokens_user')
+                    CREATE INDEX idx_user_refresh_tokens_user ON user_refresh_tokens(user_id);
+
+                IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'audit_logs')
+                BEGIN
+                    CREATE TABLE audit_logs (
+                        id              INT IDENTITY(1,1) PRIMARY KEY,
+                        user_id         INTEGER,
+                        username        VARCHAR(100),
+                        action          VARCHAR(100) NOT NULL,
+                        target_type     VARCHAR(50),
+                        target_id       VARCHAR(100),
+                        details         NVARCHAR(MAX),
+                        ip_address      VARCHAR(45),
+                        created_at      DATETIME2 DEFAULT GETDATE()
+                    );
+                END
+
+                IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_audit_logs_action')
+                    CREATE INDEX idx_audit_logs_action ON audit_logs(action);
+                IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_audit_logs_created')
+                    CREATE INDEX idx_audit_logs_created ON audit_logs(created_at);
+            `);
+            await recordMigration('011_refresh_tokens_and_audit', 'Persistent HttpOnly refresh token sessions and audit logging');
+        }
+
         console.log('✅ All database schema migrations verified and up to date.');
     } catch (err) {
         console.error('❌ Migration error:', err.message);

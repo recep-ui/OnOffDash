@@ -1,3 +1,4 @@
+import { getAccessToken } from '../../services/api';
 import { useState } from 'react';
 import FileDropzone from '../../components/pdf/FileDropzone';
 import { useNotification } from '../../components/NotificationProvider';
@@ -43,7 +44,7 @@ export default function WatermarkPdfPage({ onBack }) {
     formData.append('font_size', fontSize);
     formData.append('rotation', rotation);
 
-    const token = localStorage.getItem('token');
+    const token = getAccessToken();
     const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
 
     try {

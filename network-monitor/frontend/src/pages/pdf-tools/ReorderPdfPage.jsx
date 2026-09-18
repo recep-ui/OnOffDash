@@ -1,3 +1,4 @@
+import { getAccessToken } from '../../services/api';
 import { useState } from 'react';
 import FileDropzone from '../../components/pdf/FileDropzone';
 import { useNotification } from '../../components/NotificationProvider';
@@ -23,7 +24,7 @@ export default function ReorderPdfPage({ onBack }) {
       const formData = new FormData();
       formData.append('file', selectedFile);
 
-      const token = localStorage.getItem('token');
+      const token = getAccessToken();
       const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
 
       try {
@@ -106,7 +107,7 @@ export default function ReorderPdfPage({ onBack }) {
     formData.append('file', file);
     formData.append('page_configs', JSON.stringify(configs));
 
-    const token = localStorage.getItem('token');
+    const token = getAccessToken();
     const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
 
     try {

@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { pool } = require('../db/connection');
-const xlsx = require('xlsx');
+const { createExcelSingleSheet, readExcelRows } = require('../utils/excelHelper');
 const { requireRole } = require('../middleware/auth');
 const { sanitizeRows } = require('../utils/excelSanitizer');
 const { isValidIP, isValidMAC, sanitizePagination } = require('../utils/validators');
@@ -67,10 +67,7 @@ router.get('/export', async (req, res) => {
             'SeriNo': p.serial_no || '',
             'Toner': p.toner_model || ''
         }));
-        const ws = xlsx.utils.json_to_sheet(sanitizeRows(excelRows));
-        const wb = xlsx.utils.book_new();
-        xlsx.utils.book_append_sheet(wb, ws, "Yazıcı Listesi");
-        const buf = xlsx.write(wb, { type: 'buffer', bookType: 'xlsx' });
+        const buf = await createExcelSingleSheet("Yazıcı Listesi", excelRows);
         res.setHeader('Content-Disposition', 'attachment; filename="Yazici_Listesi_Export.xlsx"');
         res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         res.send(buf);
@@ -92,9 +89,16 @@ router.post('/import', requireRole('operator'), async (req, res) => {
             return res.status(413).json({ error: 'Dosya boyutu çok büyük (Maksimum 10MB).' });
         }
         const buffer = Buffer.from(fileData, 'base64');
-        const workbook = xlsx.read(buffer, { type: 'buffer' });
-        const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-        const rawRows = xlsx.utils.sheet_to_json(worksheet);
+        let rawRows;
+        try {
+            rawRows = await readExcelRows(buffer);
+        } catch (excelErr) {
+            return res.status(400).json({ error: 'Geçersiz veya bozuk Excel dosyası: ' + excelErr.message });
+        }
+
+        if (!Array.isArray(rawRows) || rawRows.length === 0) {
+            return res.status(400).json({ error: 'Excel dosyasında işlenecek veri bulunamadı.' });
+        }
 
         await client.query("BEGIN");
         let count = 0;
@@ -165,10 +169,7 @@ router.get('/toners/stock/export', async (req, res) => {
             'TonerAdı': s.toner_model || '',
             'Adet': s.quantity || 0
         }));
-        const ws = xlsx.utils.json_to_sheet(sanitizeRows(excelRows));
-        const wb = xlsx.utils.book_new();
-        xlsx.utils.book_append_sheet(wb, ws, "Toner Stokları");
-        const buf = xlsx.write(wb, { type: 'buffer', bookType: 'xlsx' });
+        const buf = await createExcelSingleSheet("Toner Stokları", excelRows);
         res.setHeader('Content-Disposition', 'attachment; filename="Toner_Stoklari_Export.xlsx"');
         res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         res.send(buf);
@@ -190,9 +191,16 @@ router.post('/toners/stock/import', requireRole('operator'), async (req, res) =>
             return res.status(413).json({ error: 'Dosya boyutu çok büyük (Maksimum 10MB).' });
         }
         const buffer = Buffer.from(fileData, 'base64');
-        const workbook = xlsx.read(buffer, { type: 'buffer' });
-        const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-        const rawRows = xlsx.utils.sheet_to_json(worksheet);
+        let rawRows;
+        try {
+            rawRows = await readExcelRows(buffer);
+        } catch (excelErr) {
+            return res.status(400).json({ error: 'Geçersiz veya bozuk Excel dosyası: ' + excelErr.message });
+        }
+
+        if (!Array.isArray(rawRows) || rawRows.length === 0) {
+            return res.status(400).json({ error: 'Excel dosyasında işlenecek veri bulunamadı.' });
+        }
 
         await client.query("BEGIN");
         let count = 0;
@@ -236,10 +244,7 @@ router.get('/toners/replacements/export', async (req, res) => {
             'Kullanıcı / Personel': r.username || '',
             'Toner Modeli': r.toner_model || ''
         }));
-        const ws = xlsx.utils.json_to_sheet(sanitizeRows(excelRows));
-        const wb = xlsx.utils.book_new();
-        xlsx.utils.book_append_sheet(wb, ws, "Toner Değişim Geçmişi");
-        const buf = xlsx.write(wb, { type: 'buffer', bookType: 'xlsx' });
+        const buf = await createExcelSingleSheet("Toner Değişim Geçmişi", excelRows);
         res.setHeader('Content-Disposition', 'attachment; filename="Toner_Degisim_Gecmisi_Export.xlsx"');
         res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         res.send(buf);
@@ -261,9 +266,16 @@ router.post('/toners/replacements/import', requireRole('operator'), async (req, 
             return res.status(413).json({ error: 'Dosya boyutu çok büyük (Maksimum 10MB).' });
         }
         const buffer = Buffer.from(fileData, 'base64');
-        const workbook = xlsx.read(buffer, { type: 'buffer' });
-        const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-        const rawRows = xlsx.utils.sheet_to_json(worksheet);
+        let rawRows;
+        try {
+            rawRows = await readExcelRows(buffer);
+        } catch (excelErr) {
+            return res.status(400).json({ error: 'Geçersiz veya bozuk Excel dosyası: ' + excelErr.message });
+        }
+
+        if (!Array.isArray(rawRows) || rawRows.length === 0) {
+            return res.status(400).json({ error: 'Excel dosyasında işlenecek veri bulunamadı.' });
+        }
 
         await client.query("BEGIN");
         await client.query("DELETE FROM toner_replacements");

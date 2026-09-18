@@ -30,6 +30,7 @@ import {
 import { useNotification } from './NotificationProvider';
 import Button from './ui/Button';
 import Card from './ui/Card';
+import { fetchWithAuth } from '../services/api';
 
 export default function AnalyticsPanel() {
   const { showToast } = useNotification();
@@ -39,10 +40,7 @@ export default function AnalyticsPanel() {
   const fetchSummary = useCallback(async () => {
     try {
       setLoading(true);
-      const token = localStorage.getItem('token');
-      const res = await fetch('/api/analytics/summary', {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
+      const res = await fetchWithAuth('/api/analytics/summary');
       if (!res.ok) throw new Error('Analitik verileri yüklenemedi.');
       const summary = await res.json();
       setData(summary);

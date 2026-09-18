@@ -1,3 +1,4 @@
+import { getAccessToken } from '../../services/api';
 import { useState } from 'react';
 import FileDropzone from '../../components/pdf/FileDropzone';
 import { useNotification } from '../../components/NotificationProvider';
@@ -49,7 +50,7 @@ export default function MergePdfPage({ onBack }) {
       const response = await fetch('/api/pdf/merge', {
         method: 'POST',
         headers: {
-          ...(localStorage.getItem('token') ? { 'Authorization': `Bearer ${localStorage.getItem('token')}` } : {})
+          ...(getAccessToken() ? { 'Authorization': `Bearer ${getAccessToken()}` } : {})
         },
         body: formData,
       });

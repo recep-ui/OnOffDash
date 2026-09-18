@@ -7,6 +7,8 @@ os.environ["JWT_SECRET"] = "this-is-a-test-jwt-secret-key-at-least-32-chars-long
 
 from app.utils.auth import verify_jwt_token, require_authenticated_user, HTTPException
 
+import time
+
 class DummyCredentials:
     def __init__(self, token):
         self.credentials = token
@@ -15,7 +17,7 @@ class TestPdfAuth(unittest.TestCase):
     def setUp(self):
         self.secret = os.environ["JWT_SECRET"]
         self.valid_token = jwt.encode(
-            {"id": 42, "username": "pdf_operator", "role": "operator"},
+            {"id": 42, "username": "pdf_operator", "role": "operator", "exp": int(time.time()) + 3600},
             self.secret,
             algorithm="HS256"
         )
@@ -26,9 +28,19 @@ class TestPdfAuth(unittest.TestCase):
         self.assertEqual(payload["username"], "pdf_operator")
         self.assertEqual(payload["role"], "operator")
 
+    def test_missing_exp_claim_rejection(self):
+        token_no_exp = jwt.encode(
+            {"id": 42, "username": "pdf_operator", "role": "operator"},
+            self.secret,
+            algorithm="HS256"
+        )
+        with self.assertRaises(HTTPException) as ctx:
+            verify_jwt_token(token_no_exp)
+        self.assertEqual(ctx.exception.status_code, 401)
+
     def test_invalid_signature_rejection(self):
         tampered_token = jwt.encode(
-            {"id": 42, "username": "hacker", "role": "admin"},
+            {"id": 42, "username": "hacker", "role": "admin", "exp": int(time.time()) + 3600},
             "wrong-secret-key-32-characters-long-12345",
             algorithm="HS256"
         )
@@ -54,7 +66,7 @@ class TestPdfAuth(unittest.TestCase):
 
     def test_missing_id_claim_rejection(self):
         token_no_id = jwt.encode(
-            {"username": "anonymous", "role": "operator"},
+            {"username": "anonymous", "role": "operator", "exp": int(time.time()) + 3600},
             self.secret,
             algorithm="HS256"
         )
@@ -64,7 +76,7 @@ class TestPdfAuth(unittest.TestCase):
 
     def test_missing_role_claim_rejection(self):
         token_no_role = jwt.encode(
-            {"id": 42, "username": "no_role_user"},
+            {"id": 42, "username": "no_role_user", "exp": int(time.time()) + 3600},
             self.secret,
             algorithm="HS256"
         )
@@ -74,7 +86,7 @@ class TestPdfAuth(unittest.TestCase):
 
     def test_must_change_password_forbidden(self):
         token_must_change = jwt.encode(
-            {"id": 42, "username": "new_user", "role": "viewer", "must_change_password": True},
+            {"id": 42, "username": "new_user", "role": "viewer", "must_change_password": True, "exp": int(time.time()) + 3600},
             self.secret,
             algorithm="HS256"
         )

@@ -1,509 +1,732 @@
 const { describe, it, before, after, beforeEach } = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('http');
-const express = require('express');
+const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'this-is-a-test-jwt-secret-key-at-least-32-chars-long';
 process.env.AGENT_API_KEY = process.env.AGENT_API_KEY || 'this-is-a-test-agent-key-at-least-32-chars-long';
 
+// Import REAL application and router infrastructure
+const { app } = require('../server');
+const { pool } = require('../db/connection');
 const { 
-  authenticateToken, 
-  requireRole, 
-  setUserSession, 
-  invalidateUserSessions, 
-  markUserDeleted, 
-  clearSessionCache 
+    clearSessionCache, 
+    setUserSession, 
+    invalidateUserSessions, 
+    markUserDeleted,
+    verifyAccessToken 
 } = require('../middleware/auth');
-const { authenticateAgent } = require('../middleware/agentAuth');
-const { validateHeartbeatPayload, validateSoftwarePayload } = require('../utils/validators');
+const { parseCidr, ipToLong, longToIp } = require('../utils/ipamUtils');
 
-describe('HTTP API Route & Integration Test Suite', () => {
-  let app;
-  let server;
-  let baseUrl;
+describe('Real Production Route Integration Test Suite', () => {
+    let server;
+    let baseUrl;
+    const emittedEvents = [];
 
-  // Test state
-  const testUsers = {
-    admin: { id: 1, username: 'admin', passwordHash: bcrypt.hashSync('AdminPass123!', 4), role: 'admin' },
-    operator: { id: 2, username: 'operator1', passwordHash: bcrypt.hashSync('OpPass123!', 4), role: 'operator' },
-    viewer: { id: 3, username: 'viewer1', passwordHash: bcrypt.hashSync('ViewPass123!', 4), role: 'viewer' }
-  };
+    // In-memory test state
+    let testUsers = [];
+    let testDevices = [];
+    let testCredentials = [];
+    let testRefreshTokens = [];
+    let testSoftware = [];
 
-  before(async () => {
-    app = express();
-    app.use(express.json({ limit: '10mb' }));
+    // Mock IO attached to production app
+    const mockIo = {
+        emit(event, data) {
+            emittedEvents.push({ event, data });
+        },
+        sockets: {
+            sockets: new Map()
+        },
+        disconnectUser(userId) {}
+    };
 
-    // In-memory rate limiting test state
-    const loginAttempts = new Map();
-    const LOGIN_LIMIT = 5;
+    before(async () => {
+        app.set('io', mockIo);
 
-    // 1. POST /api/auth/login with rate limiter
-    app.post('/api/auth/login', (req, res) => {
-      const ip = req.ip || '127.0.0.1';
-      const count = (loginAttempts.get(ip) || 0) + 1;
-      loginAttempts.set(ip, count);
+        // Intercept pool.query with in-memory SQL mock engine
+        const mockQueryFn = async (text, params = []) => {
+            const sql = text.trim();
+            const upper = sql.toUpperCase();
 
-      if (count > LOGIN_LIMIT) {
-        return res.status(429).json({ error: 'Çok fazla giriş denemesi. Lütfen daha sonra tekrar deneyiniz.' });
-      }
+            // 1. Users queries
+            if (upper.includes('FROM USERS WHERE USERNAME =')) {
+                const username = params[0];
+                const found = testUsers.filter(u => u.username === username);
+                return { rows: found, rowCount: found.length };
+            }
 
-      const { username, password } = req.body;
-      if (!username || !password) {
-        return res.status(400).json({ error: 'Kullanıcı adı ve şifre gereklidir.' });
-      }
+            if (upper.includes('FROM USERS WHERE ID =')) {
+                const id = parseInt(params[0], 10);
+                const found = testUsers.filter(u => u.id === id);
+                return { rows: found, rowCount: found.length };
+            }
 
-      const user = Object.values(testUsers).find(u => u.username === username);
-      if (!user || !bcrypt.compareSync(password, user.passwordHash)) {
-        return res.status(401).json({ error: 'Hatalı kullanıcı adı veya şifre.' });
-      }
+            if (upper.includes('UPDATE USERS SET') && upper.includes('PASSWORD_HASH')) {
+                const newHash = params[0];
+                const id = parseInt(params[1], 10);
+                const u = testUsers.find(x => x.id === id);
+                if (u) {
+                    u.password_hash = newHash;
+                    u.must_change_password = 0;
+                    u.token_version = (u.token_version || 1) + 1;
+                    return { rows: [u], rowCount: 1 };
+                }
+                return { rows: [], rowCount: 0 };
+            }
 
-      const token = jwt.sign(
-        { id: user.id, username: user.username, role: user.role, token_version: 1 },
-        process.env.JWT_SECRET,
-        { expiresIn: '30m' }
-      );
+            if (upper.includes('UPDATE USERS SET') && upper.includes('ROLE =')) {
+                const role = params[0];
+                const id = parseInt(params[1], 10);
+                const u = testUsers.find(x => x.id === id);
+                if (u) {
+                    u.role = role;
+                    u.token_version = (u.token_version || 1) + 1;
+                    return { rows: [u], rowCount: 1 };
+                }
+                return { rows: [], rowCount: 0 };
+            }
 
-      setUserSession(user.id, { token_version: 1, role: user.role });
-      res.json({ token, user: { id: user.id, username: user.username, role: user.role } });
-    });
+            if (upper.includes('DELETE FROM USERS')) {
+                const id = parseInt(params[0], 10);
+                const idx = testUsers.findIndex(x => x.id === id);
+                if (idx !== -1) {
+                    const removed = testUsers.splice(idx, 1)[0];
+                    return { rows: [{ username: removed.username }], rowCount: 1 };
+                }
+                return { rows: [], rowCount: 0 };
+            }
 
-    // 2. RBAC Protected Routes: /api/test/devices
-    app.get('/api/test/devices', authenticateToken, (req, res) => {
-      res.json({ message: 'Device list', user: req.user.username });
-    });
+            // 2. Refresh tokens
+            if (upper.includes('INSERT INTO USER_REFRESH_TOKENS')) {
+                const [userId, tokenHash, tokenVersion] = params;
+                const rec = {
+                    id: testRefreshTokens.length + 1,
+                    user_id: userId,
+                    token_hash: tokenHash,
+                    token_version: tokenVersion,
+                    expires_at: new Date(Date.now() + 7 * 86400 * 1000),
+                    revoked_at: null
+                };
+                testRefreshTokens.push(rec);
+                return { rows: [rec], rowCount: 1 };
+            }
 
-    app.post('/api/test/devices', authenticateToken, requireRole(['admin', 'operator']), (req, res) => {
-      res.status(201).json({ success: true, createdBy: req.user.username, device: req.body });
-    });
+            if (upper.includes('FROM USER_REFRESH_TOKENS R') && upper.includes('WHERE R.TOKEN_HASH =')) {
+                const hash = params[0];
+                const session = testRefreshTokens.find(r => r.token_hash === hash);
+                if (!session) return { rows: [], rowCount: 0 };
+                const u = testUsers.find(x => x.id === session.user_id);
+                if (!u) return { rows: [], rowCount: 0 };
+                return {
+                    rows: [{
+                        id: session.id,
+                        user_id: session.user_id,
+                        token_version: session.token_version,
+                        expires_at: session.expires_at,
+                        revoked_at: session.revoked_at,
+                        uid: u.id,
+                        username: u.username,
+                        role: u.role,
+                        current_token_version: u.token_version,
+                        must_change_password: u.must_change_password
+                    }],
+                    rowCount: 1
+                };
+            }
 
-    app.delete('/api/test/devices/:id', authenticateToken, requireRole(['admin']), (req, res) => {
-      res.json({ success: true, deletedId: req.params.id, deletedBy: req.user.username });
-    });
+            if (upper.includes('UPDATE USER_REFRESH_TOKENS SET REVOKED_AT = GETDATE()')) {
+                if (upper.includes('WHERE ID =')) {
+                    const id = params[0];
+                    const s = testRefreshTokens.find(x => x.id === id);
+                    if (s) s.revoked_at = new Date();
+                } else if (upper.includes('WHERE TOKEN_HASH =')) {
+                    const hash = params[0];
+                    const s = testRefreshTokens.find(x => x.token_hash === hash);
+                    if (s) s.revoked_at = new Date();
+                } else if (upper.includes('WHERE USER_ID =')) {
+                    const uid = params[0];
+                    testRefreshTokens.filter(x => x.user_id === uid).forEach(s => s.revoked_at = new Date());
+                }
+                return { rows: [], rowCount: 1 };
+            }
 
-    // 3. Heartbeat Route: /api/heartbeat
-    app.post('/api/heartbeat', authenticateAgent, (req, res) => {
-      const validation = validateHeartbeatPayload(req.body);
-      if (!validation.valid) {
-        return res.status(400).json({ error: validation.error });
-      }
-      res.json({ success: true, received: true, timestamp: new Date().toISOString() });
-    });
+            // 3. Devices
+            if (upper.includes('FROM DEVICES WHERE IP_ADDRESS =')) {
+                const ip = params[0]?.trim();
+                const found = testDevices.filter(d => d.ip_address === ip);
+                return { rows: found, rowCount: found.length };
+            }
 
-    // 4. Software Inventory Route: /api/software
-    app.post('/api/software', authenticateAgent, (req, res) => {
-      const { device_ip, software } = req.body;
-      const validation = validateSoftwarePayload(device_ip, software, 2000);
-      if (!validation.valid) {
-        return res.status(validation.status || 400).json({ error: validation.error });
-      }
+            if (upper.includes('FROM DEVICES WHERE ID =')) {
+                const id = parseInt(params[0], 10);
+                const found = testDevices.filter(d => d.id === id);
+                return { rows: found, rowCount: found.length };
+            }
 
-      const CHUNK_SIZE = 100;
-      const chunks = [];
-      for (let i = 0; i < software.length; i += CHUNK_SIZE) {
-        chunks.push(software.slice(i, i + CHUNK_SIZE));
-      }
+            if (upper.includes('SELECT IP_ADDRESS FROM DEVICES')) {
+                return { rows: testDevices.map(d => ({ ip_address: d.ip_address })), rowCount: testDevices.length };
+            }
 
-      res.json({ 
-        success: true, 
-        device_ip, 
-        totalProcessed: software.length, 
-        chunkCount: chunks.length 
-      });
-    });
+            if (upper.includes('SELECT ID, HOSTNAME, IP_ADDRESS, MAC_ADDRESS, DEPARTMENT, STATUS FROM DEVICES')) {
+                return { rows: testDevices, rowCount: testDevices.length };
+            }
 
-    server = http.createServer(app);
-    await new Promise(resolve => server.listen(0, resolve));
-    const port = server.address().port;
-    baseUrl = `http://127.0.0.1:${port}`;
-  });
+            if (upper.includes('MERGE INTO DEVICES')) {
+                const [hostname, ip_address, mac_address, os_name, username] = params;
+                let existing = testDevices.find(d => d.ip_address === ip_address);
+                if (existing) {
+                    existing.hostname = hostname;
+                    if (mac_address) existing.mac_address = mac_address;
+                    if (os_name) existing.os_name = os_name;
+                    if (username) existing.username = username;
+                    existing.agent_installed = 1;
+                    existing.agent_status = 'online';
+                    existing.last_heartbeat_at = new Date();
+                    return { rows: [existing], rowCount: 1 };
+                } else {
+                    const created = {
+                        id: testDevices.length + 1,
+                        hostname,
+                        ip_address,
+                        mac_address: mac_address || null,
+                        os_name: os_name || '',
+                        username: username || '',
+                        agent_installed: 1,
+                        agent_status: 'online',
+                        status: 'offline', // Neutral default
+                        last_heartbeat_at: new Date()
+                    };
+                    testDevices.push(created);
+                    return { rows: [created], rowCount: 1 };
+                }
+            }
 
-  after(async () => {
-    if (server) {
-      await new Promise(resolve => server.close(resolve));
-    }
-  });
+            // 4. Agent credentials
+            if (upper.includes('FROM AGENT_CREDENTIALS WHERE KEY_ID =')) {
+                const keyId = params[0];
+                const found = testCredentials.filter(c => c.key_id === keyId);
+                return { rows: found, rowCount: found.length };
+            }
 
-  beforeEach(() => {
-    clearSessionCache();
-  });
+            if (upper.includes('FROM AGENT_CREDENTIALS WHERE DEVICE_ID =')) {
+                const devId = params[0];
+                const found = testCredentials.filter(c => c.device_id === devId);
+                return { rows: found, rowCount: found.length };
+            }
 
-  describe('Authentication & Rate Limiting HTTP Scenarios', () => {
-    it('should successfully login and return JWT token and user profile', async () => {
-      const res = await fetch(`${baseUrl}/api/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: 'admin', password: 'AdminPass123!' })
-      });
+            if (upper.includes('UPDATE AGENT_CREDENTIALS SET LAST_USED_AT = GETDATE()')) {
+                return { rows: [], rowCount: 1 };
+            }
 
-      assert.strictEqual(res.status, 200);
-      const data = await res.json();
-      assert.ok(data.token);
-      assert.strictEqual(data.user.username, 'admin');
-      assert.strictEqual(data.user.role, 'admin');
-    });
+            if (upper.includes('INSERT INTO AGENT_CREDENTIALS')) {
+                const [device_id, key_id, key_hash] = params;
+                const rec = { id: testCredentials.length + 1, device_id, key_id, key_hash, is_revoked: false };
+                testCredentials.push(rec);
+                return { rows: [rec], rowCount: 1 };
+            }
 
-    it('should reject login with wrong password (401 Unauthorized)', async () => {
-      const res = await fetch(`${baseUrl}/api/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: 'admin', password: 'WrongPassword999!' })
-      });
+            // 5. Heartbeats & Software & Printers
+            if (upper.includes('INSERT INTO HEARTBEATS')) {
+                return { rows: [{ id: 1 }], rowCount: 1 };
+            }
 
-      assert.strictEqual(res.status, 401);
-      const data = await res.json();
-      assert.strictEqual(data.error, 'Hatalı kullanıcı adı veya şifre.');
-    });
+            if (upper.includes('DELETE FROM DEVICE_SOFTWARE WHERE DEVICE_ID =')) {
+                const devId = params[0];
+                testSoftware = testSoftware.filter(s => s.device_id !== devId);
+                return { rows: [], rowCount: 1 };
+            }
 
-    it('should enforce login rate limiting after threshold is exceeded (429 Too Many Requests)', async () => {
-      // Rapid fire requests to trigger rate limit (threshold is 5)
-      let lastStatus = 200;
-      for (let i = 0; i < 6; i++) {
-        const res = await fetch(`${baseUrl}/api/auth/login`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ username: 'nonexistent', password: 'bad' })
+            if (upper.includes('INSERT INTO DEVICE_SOFTWARE')) {
+                return { rows: [], rowCount: 1 };
+            }
+
+            if (upper.includes('FROM PRINTERS')) {
+                return { rows: [], rowCount: 0 };
+            }
+
+            return { rows: [], rowCount: 0 };
+        };
+        mockQueryFn.isMocked = true;
+        pool.query = mockQueryFn;
+
+        pool.connect = async () => ({
+            query: async (t, p) => pool.query(t, p),
+            release: () => {}
         });
-        lastStatus = res.status;
-      }
-      assert.strictEqual(lastStatus, 429);
-    });
-  });
 
-  describe('RBAC (Role-Based Access Control) HTTP Scenarios', () => {
-    function generateToken(user, expiresIn = '30m') {
-      setUserSession(user.id, { token_version: 1, role: user.role });
-      return jwt.sign(
-        { id: user.id, username: user.username, role: user.role, token_version: 1 },
-        process.env.JWT_SECRET,
-        { expiresIn }
-      );
-    }
-
-    it('should block viewer mutation (POST /api/test/devices) with 403 Forbidden', async () => {
-      const viewerToken = generateToken(testUsers.viewer);
-      const res = await fetch(`${baseUrl}/api/test/devices`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${viewerToken}`
-        },
-        body: JSON.stringify({ hostname: 'NEW-PC', ip_address: '10.0.0.50' })
-      });
-
-      assert.strictEqual(res.status, 403);
-      const data = await res.json();
-      assert.strictEqual(data.error, 'Bu işlem için yetkiniz bulunmamaktadır.');
-    });
-
-    it('should permit operator mutation (POST /api/test/devices) with 201 Created', async () => {
-      const operatorToken = generateToken(testUsers.operator);
-      const res = await fetch(`${baseUrl}/api/test/devices`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${operatorToken}`
-        },
-        body: JSON.stringify({ hostname: 'OP-PC', ip_address: '10.0.0.60' })
-      });
-
-      assert.strictEqual(res.status, 201);
-      const data = await res.json();
-      assert.strictEqual(data.success, true);
-      assert.strictEqual(data.createdBy, 'operator1');
-    });
-
-    it('should block operator from admin delete mutation with 403 Forbidden', async () => {
-      const operatorToken = generateToken(testUsers.operator);
-      const res = await fetch(`${baseUrl}/api/test/devices/42`, {
-        method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${operatorToken}` }
-      });
-
-      assert.strictEqual(res.status, 403);
-    });
-
-    it('should permit admin to delete device with 200 OK', async () => {
-      const adminToken = generateToken(testUsers.admin);
-      const res = await fetch(`${baseUrl}/api/test/devices/42`, {
-        method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${adminToken}` }
-      });
-
-      assert.strictEqual(res.status, 200);
-      const data = await res.json();
-      assert.strictEqual(data.success, true);
-      assert.strictEqual(data.deletedId, '42');
-    });
-  });
-
-  describe('JWT Expiry & Server-Side Session Invalidation Scenarios', () => {
-    it('should reject expired JWT token with 401 Unauthorized', async () => {
-      const expiredToken = jwt.sign(
-        { id: 1, username: 'admin', role: 'admin', token_version: 1 },
-        process.env.JWT_SECRET,
-        { expiresIn: '-1s' }
-      );
-
-      const res = await fetch(`${baseUrl}/api/test/devices`, {
-        headers: { 'Authorization': `Bearer ${expiredToken}` }
-      });
-
-      assert.strictEqual(res.status, 401);
-      const data = await res.json();
-      assert.ok(data.error.includes('Geçersiz veya süresi dolmuş'));
-    });
-
-    it('should invalidate previous token after role change (admin changed user role)', async () => {
-      // User initially has operator token
-      setUserSession(2, { token_version: 1, role: 'operator' });
-      const operatorToken = jwt.sign(
-        { id: 2, username: 'operator1', role: 'operator', token_version: 1 },
-        process.env.JWT_SECRET,
-        { expiresIn: '30m' }
-      );
-
-      // Verify token initially works
-      const initialRes = await fetch(`${baseUrl}/api/test/devices`, {
-        headers: { 'Authorization': `Bearer ${operatorToken}` }
-      });
-      assert.strictEqual(initialRes.status, 200);
-
-      // Admin downgrades user to viewer in sessionCache
-      setUserSession(2, { token_version: 1, role: 'viewer' });
-
-      // Request with old token (which claims role='operator') must be rejected with 401
-      const postChangeRes = await fetch(`${baseUrl}/api/test/devices`, {
-        headers: { 'Authorization': `Bearer ${operatorToken}` }
-      });
-      assert.strictEqual(postChangeRes.status, 401);
-      const data = await postChangeRes.json();
-      assert.strictEqual(data.error, 'Kullanıcı rolü güncellenmiştir. Lütfen tekrar giriş yapınız.');
-    });
-
-    it('should invalidate token when user changes password (token_version incremented)', async () => {
-      setUserSession(1, { token_version: 1, role: 'admin' });
-      const oldToken = jwt.sign(
-        { id: 1, username: 'admin', role: 'admin', token_version: 1 },
-        process.env.JWT_SECRET,
-        { expiresIn: '30m' }
-      );
-
-      // Password changed -> invalidateUserSessions
-      invalidateUserSessions(1); // token_version becomes 2
-
-      const res = await fetch(`${baseUrl}/api/test/devices`, {
-        headers: { 'Authorization': `Bearer ${oldToken}` }
-      });
-
-      assert.strictEqual(res.status, 401);
-      const data = await res.json();
-      assert.ok(data.error.includes('Oturum sonlandırıldı veya parola değiştirildi'));
-    });
-
-    it('should invalidate tokens for deleted users immediately', async () => {
-      setUserSession(3, { token_version: 1, role: 'viewer' });
-      const token = jwt.sign(
-        { id: 3, username: 'viewer1', role: 'viewer', token_version: 1 },
-        process.env.JWT_SECRET,
-        { expiresIn: '30m' }
-      );
-
-      markUserDeleted(3);
-
-      const res = await fetch(`${baseUrl}/api/test/devices`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-
-      assert.strictEqual(res.status, 401);
-      const data = await res.json();
-      assert.strictEqual(data.error, 'Kullanıcı hesabı bulunamadı veya silinmiştir.');
-    });
-  });
-
-  describe('Agent Heartbeat & Software Validation HTTP Scenarios', () => {
-    it('should reject agent request without X-Agent-Key header with 401', async () => {
-      const res = await fetch(`${baseUrl}/api/heartbeat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ hostname: 'HOST-01', ip_address: '10.0.0.1' })
-      });
-
-      assert.strictEqual(res.status, 401);
-      const data = await res.json();
-      assert.strictEqual(data.error, 'Ajan kimlik doğrulaması başarısız. X-Agent-Key başlığı eksik.');
-    });
-
-    it('should reject agent request with invalid agent credential with 401', async () => {
-      const res = await fetch(`${baseUrl}/api/heartbeat`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Agent-Key': 'invalid_secret_key_12345'
-        },
-        body: JSON.stringify({ hostname: 'HOST-01', ip_address: '10.0.0.1' })
-      });
-
-      assert.strictEqual(res.status, 401);
-      const data = await res.json();
-      assert.strictEqual(data.error, 'Geçersiz ajan kimlik doğrulama anahtarı.');
-    });
-
-    it('should reject heartbeat with bad IP address (400 Bad Request)', async () => {
-      const res = await fetch(`${baseUrl}/api/heartbeat`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Agent-Key': process.env.AGENT_API_KEY
-        },
-        body: JSON.stringify({
-          hostname: 'SRV-TEST',
-          ip_address: '999.999.999.999', // Invalid IP
-          cpu_usage: 25,
-          ram_usage: 50,
-          disk_usage: 40,
-          uptime_seconds: 1200
-        })
-      });
-
-      assert.strictEqual(res.status, 400);
-      const data = await res.json();
-      assert.ok(data.error.includes('valid IPv4 or IPv6'));
-    });
-
-    it('should reject heartbeat with malformed out-of-bounds metrics (400 Bad Request)', async () => {
-      const res = await fetch(`${baseUrl}/api/heartbeat`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Agent-Key': process.env.AGENT_API_KEY
-        },
-        body: JSON.stringify({
-          hostname: 'SRV-TEST',
-          ip_address: '192.168.1.100',
-          cpu_usage: 150, // Malformed: > 100
-          ram_usage: -5,  // Malformed: < 0
-          disk_usage: 30,
-          uptime_seconds: 500
-        })
-      });
-
-      assert.strictEqual(res.status, 400);
-      const data = await res.json();
-      assert.ok(data.error.includes('cpu_usage') || data.error.includes('ram_usage'));
-    });
-
-    it('should safely process software inventory with 500+ items and chunk into batches of 100', async () => {
-      const items = [];
-      for (let i = 1; i <= 550; i++) {
-        items.push({
-          name: `Enterprise Software Package ${i}`,
-          version: `2.${i % 10}.0`,
-          vendor: 'Global Enterprise Corp',
-          install_date: '2026-01-15'
+        // Start listening on dynamic port
+        server = http.createServer(app);
+        await new Promise((resolve) => {
+            server.listen(0, '127.0.0.1', () => {
+                const port = server.address().port;
+                baseUrl = `http://127.0.0.1:${port}`;
+                resolve();
+            });
         });
-      }
-
-      const res = await fetch(`${baseUrl}/api/software`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Agent-Key': process.env.AGENT_API_KEY
-        },
-        body: JSON.stringify({
-          device_ip: '10.0.10.45',
-          software: items
-        })
-      });
-
-      assert.strictEqual(res.status, 200);
-      const data = await res.json();
-      assert.strictEqual(data.success, true);
-      assert.strictEqual(data.totalProcessed, 550);
-      assert.strictEqual(data.chunkCount, 6); // 550 items chunked by 100 = 6 chunks
     });
 
-    it('should reject software inventory that exceeds max allowable items (413 Payload Too Large)', async () => {
-      const oversizedItems = new Array(3001).fill({ name: 'App', version: '1.0' });
-
-      const res = await fetch(`${baseUrl}/api/software`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Agent-Key': process.env.AGENT_API_KEY
-        },
-        body: JSON.stringify({
-          device_ip: '10.0.10.45',
-          software: oversizedItems
-        })
-      });
-
-      assert.strictEqual(res.status, 413);
-      const data = await res.json();
-      assert.ok(data.error.includes('Software inventory exceeds maximum allowed limit'));
-    });
-  });
-
-  describe('Ping Status Deduplication & Canonical Event Contract', () => {
-    it('should NOT create duplicate status logs or emit events for repeated identical ping statuses', () => {
-      let statusLogInserts = 0;
-      let emittedEvents = [];
-
-      const mockDb = {
-        query: async () => {},
-        insertLog: async () => { statusLogInserts++; }
-      };
-
-      const mockIo = {
-        emit: (event, payload) => { emittedEvents.push({ event, payload }); }
-      };
-
-      // Simulate ping transitions: 5 consecutive 'online' pings
-      let currentStatus = 'online';
-      const device = { id: 10, hostname: 'SRV-01', ip_address: '10.0.0.1', status: 'online' };
-
-      for (let cycle = 0; cycle < 5; cycle++) {
-        const newStatus = 'online';
-        const isTransition = currentStatus !== newStatus;
-        if (isTransition) {
-          mockDb.insertLog();
-          mockIo.emit('device:statusChanged', {});
-          currentStatus = newStatus;
+    after(async () => {
+        if (server) {
+            await new Promise(r => server.close(r));
         }
-      }
-
-      // 5 consecutive identical states must generate ZERO log rows and ZERO socket events
-      assert.strictEqual(statusLogInserts, 0, 'No status log rows created for repeated identical states');
-      assert.strictEqual(emittedEvents.length, 0, 'No socket events emitted for repeated identical states');
-
-      // Now real transition: online -> offline
-      const newStatus = 'offline';
-      if (currentStatus !== newStatus) {
-        mockDb.insertLog();
-        mockIo.emit('device:statusChanged', {
-          device: { id: device.id, hostname: device.hostname, ip_address: device.ip_address },
-          oldStatus: currentStatus,
-          newStatus: newStatus,
-          reason: null,
-          timestamp: new Date().toISOString()
-        });
-        currentStatus = newStatus;
-      }
-
-      assert.strictEqual(statusLogInserts, 1, 'Exactly one log row created on real status transition');
-      assert.strictEqual(emittedEvents.length, 1, 'Exactly one socket event emitted on real transition');
-
-      // Verify canonical contract of emitted event
-      const event = emittedEvents[0];
-      assert.strictEqual(event.event, 'device:statusChanged');
-      assert.strictEqual(event.payload.device.id, 10);
-      assert.strictEqual(event.payload.device.hostname, 'SRV-01');
-      assert.strictEqual(event.payload.device.ip_address, '10.0.0.1');
-      assert.strictEqual(event.payload.oldStatus, 'online');
-      assert.strictEqual(event.payload.newStatus, 'offline');
-      assert.strictEqual(event.payload.reason, null);
-      assert.ok(typeof event.payload.timestamp === 'string');
     });
-  });
+
+    beforeEach(() => {
+        clearSessionCache();
+        emittedEvents.length = 0;
+        testSoftware = [];
+        testRefreshTokens = [];
+
+        testUsers = [
+            {
+                id: 1,
+                username: 'admin',
+                password_hash: bcrypt.hashSync('AdminPass123!', 4),
+                role: 'admin',
+                token_version: 1,
+                must_change_password: 0
+            },
+            {
+                id: 2,
+                username: 'operator',
+                password_hash: bcrypt.hashSync('OperatorPass123!', 4),
+                role: 'operator',
+                token_version: 1,
+                must_change_password: 0
+            }
+        ];
+
+        testDevices = [
+            {
+                id: 1,
+                hostname: 'workstation-a',
+                ip_address: '10.0.80.50',
+                status: 'offline',
+                agent_status: 'offline'
+            },
+            {
+                id: 2,
+                hostname: 'workstation-b',
+                ip_address: '10.0.80.51',
+                status: 'offline',
+                agent_status: 'offline'
+            }
+        ];
+
+        const secretA = 'secret-device-a-12345';
+        const hashA = crypto.createHash('sha256').update(secretA).digest('hex');
+
+        testCredentials = [
+            {
+                id: 1,
+                device_id: 1,
+                key_id: 'agk_devA',
+                key_hash: hashA,
+                is_revoked: false
+            },
+            {
+                id: 2,
+                device_id: 2,
+                key_id: 'agk_revoked',
+                key_hash: 'somehash',
+                is_revoked: true
+            }
+        ];
+    });
+
+    describe('1. Startup & Module Import Verification', () => {
+        it('backend boots successfully after npm ci and exports app and server', () => {
+            const serverExports = require('../server');
+            assert.ok(serverExports.app);
+            assert.ok(serverExports.server);
+        });
+
+        it('printer router loads without missing dependencies (xlsx was migrated to exceljs)', () => {
+            assert.doesNotThrow(() => {
+                require('../routes/printers');
+            });
+        });
+    });
+
+    describe('2. Authentication & Persistent JWT Revocation', () => {
+        it('should login and return short-lived access token and set HttpOnly refresh cookie', async () => {
+            const res = await fetch(`${baseUrl}/api/auth/login`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username: 'admin', password: 'AdminPass123!' })
+            });
+
+            assert.equal(res.status, 200);
+            const data = await res.json();
+            assert.ok(data.token, 'Must return JWT token');
+            assert.equal(data.user.username, 'admin');
+
+            const cookieHeader = res.headers.get('set-cookie');
+            assert.ok(cookieHeader, 'Must set Set-Cookie header');
+            assert.ok(cookieHeader.includes('HttpOnly'), 'Cookie must be HttpOnly');
+            assert.ok(cookieHeader.includes('SameSite=Strict'), 'Cookie must be SameSite=Strict');
+            assert.ok(cookieHeader.includes('refreshToken='), 'Cookie must contain refreshToken');
+        });
+
+        it('should reject expired JWT access token', async () => {
+            const expiredToken = jwt.sign(
+                { id: 1, username: 'admin', role: 'admin', token_version: 1 },
+                process.env.JWT_SECRET,
+                { expiresIn: '-1s' }
+            );
+
+            const res = await fetch(`${baseUrl}/api/devices`, {
+                headers: { 'Authorization': `Bearer ${expiredToken}` }
+            });
+            assert.equal(res.status, 401);
+            const data = await res.json();
+            assert.ok(data.error.includes('doldu') || data.error.includes('süresi'));
+        });
+
+        it('should reject token with token_version mismatch against DB', async () => {
+            const oldToken = jwt.sign(
+                { id: 1, username: 'admin', role: 'admin', token_version: 1 },
+                process.env.JWT_SECRET,
+                { expiresIn: '15m' }
+            );
+
+            // Increment DB token_version to 2
+            testUsers[0].token_version = 2;
+
+            const res = await fetch(`${baseUrl}/api/devices`, {
+                headers: { 'Authorization': `Bearer ${oldToken}` }
+            });
+            assert.equal(res.status, 401);
+        });
+
+        it('should keep old token invalid after authentication cache clear / server restart simulation', async () => {
+            const oldToken = jwt.sign(
+                { id: 1, username: 'admin', role: 'admin', token_version: 1 },
+                process.env.JWT_SECRET,
+                { expiresIn: '15m' }
+            );
+
+            // User changes password in DB -> token_version becomes 2
+            testUsers[0].token_version = 2;
+
+            // Simulate process restart or cache reset
+            clearSessionCache();
+
+            // Reuse old token -> must still query DB and return 401!
+            const res = await fetch(`${baseUrl}/api/devices`, {
+                headers: { 'Authorization': `Bearer ${oldToken}` }
+            });
+            assert.equal(res.status, 401);
+        });
+
+        it('should reject access token for deleted user even if JWT is valid', async () => {
+            const userToken = jwt.sign(
+                { id: 1, username: 'admin', role: 'admin', token_version: 1 },
+                process.env.JWT_SECRET,
+                { expiresIn: '15m' }
+            );
+
+            // Delete user from DB
+            testUsers = [];
+            clearSessionCache();
+
+            const res = await fetch(`${baseUrl}/api/devices`, {
+                headers: { 'Authorization': `Bearer ${userToken}` }
+            });
+            assert.equal(res.status, 401);
+        });
+
+        it('should reject token when user role has been changed in DB', async () => {
+            const adminToken = jwt.sign(
+                { id: 1, username: 'admin', role: 'admin', token_version: 1 },
+                process.env.JWT_SECRET,
+                { expiresIn: '15m' }
+            );
+
+            // Role changed to viewer in DB
+            testUsers[0].role = 'viewer';
+            clearSessionCache();
+
+            const res = await fetch(`${baseUrl}/api/devices`, {
+                headers: { 'Authorization': `Bearer ${adminToken}` }
+            });
+            assert.equal(res.status, 401);
+        });
+
+        it('Socket.IO auth shared validation rejects old token version', async () => {
+            const oldToken = jwt.sign(
+                { id: 1, username: 'admin', role: 'admin', token_version: 1 },
+                process.env.JWT_SECRET,
+                { expiresIn: '15m' }
+            );
+
+            testUsers[0].token_version = 2;
+            clearSessionCache();
+
+            await assert.rejects(async () => {
+                await verifyAccessToken(oldToken);
+            }, { status: 401 });
+        });
+    });
+
+    describe('3. Heartbeat & Network Status Separation', () => {
+        it('should reject heartbeat with oversized or invalid optional string fields', async () => {
+            const oversizedOs = 'A'.repeat(105);
+            const res = await fetch(`${baseUrl}/api/heartbeat`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Agent-Key': process.env.AGENT_API_KEY
+                },
+                body: JSON.stringify({
+                    hostname: 'host-1',
+                    ip_address: '10.0.80.10',
+                    os_name: oversizedOs
+                })
+            });
+            assert.equal(res.status, 400);
+        });
+
+        it('heartbeat changes agent_status to online but leaves network status offline and does NOT emit device:statusChanged', async () => {
+            // Initial state: device 1 has status=offline, agent_status=offline
+            assert.equal(testDevices[0].status, 'offline');
+            assert.equal(testDevices[0].agent_status, 'offline');
+
+            const res = await fetch(`${baseUrl}/api/heartbeat`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Agent-Key': 'agk_devA.secret-device-a-12345'
+                },
+                body: JSON.stringify({
+                    hostname: 'workstation-a',
+                    ip_address: '10.0.80.50',
+                    os_name: 'Windows 11',
+                    cpu_usage: 25,
+                    ram_usage: 40
+                })
+            });
+
+            assert.equal(res.status, 200);
+
+            // Database state verification
+            assert.equal(testDevices[0].status, 'offline', 'Network status MUST remain offline');
+            assert.equal(testDevices[0].agent_status, 'online', 'Agent status MUST become online');
+
+            // Socket.IO event assertions
+            const agentStatusEvent = emittedEvents.find(e => e.event === 'agent:statusChanged');
+            assert.ok(agentStatusEvent, 'agent:statusChanged MUST be emitted');
+            assert.equal(agentStatusEvent.data.newStatus, 'online');
+
+            const deviceStatusEvent = emittedEvents.find(e => e.event === 'device:statusChanged');
+            assert.equal(deviceStatusEvent, undefined, 'device:statusChanged MUST NOT be emitted by heartbeat');
+        });
+    });
+
+    describe('4. Per-Device Agent Credential Impersonation Protections', () => {
+        it('Device A key -> Device A telemetry -> accepted', async () => {
+            const res = await fetch(`${baseUrl}/api/heartbeat`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Agent-Key': 'agk_devA.secret-device-a-12345'
+                },
+                body: JSON.stringify({
+                    hostname: 'workstation-a',
+                    ip_address: '10.0.80.50'
+                })
+            });
+            assert.equal(res.status, 200);
+        });
+
+        it('Device A key -> Device B telemetry -> 403 Forbidden', async () => {
+            const res = await fetch(`${baseUrl}/api/heartbeat`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Agent-Key': 'agk_devA.secret-device-a-12345'
+                },
+                body: JSON.stringify({
+                    hostname: 'workstation-b',
+                    ip_address: '10.0.80.51' // Belongs to Device B
+                })
+            });
+            assert.equal(res.status, 403);
+        });
+
+        it('Device A key -> unknown IP -> 403 Forbidden (prevents silent device creation)', async () => {
+            const res = await fetch(`${baseUrl}/api/heartbeat`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Agent-Key': 'agk_devA.secret-device-a-12345'
+                },
+                body: JSON.stringify({
+                    hostname: 'unknown-device',
+                    ip_address: '10.0.80.99' // Unknown IP not matching Device A
+                })
+            });
+            assert.equal(res.status, 403);
+        });
+
+        it('revoked agent key is rejected with 401', async () => {
+            const res = await fetch(`${baseUrl}/api/heartbeat`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Agent-Key': 'agk_revoked.anysecret'
+                },
+                body: JSON.stringify({
+                    hostname: 'workstation-b',
+                    ip_address: '10.0.80.51'
+                })
+            });
+            assert.equal(res.status, 401);
+        });
+
+        it('malformed agent key is rejected with 401', async () => {
+            const res = await fetch(`${baseUrl}/api/heartbeat`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Agent-Key': 'agk_malformed_no_dot_or_secret'
+                },
+                body: JSON.stringify({
+                    hostname: 'workstation-a',
+                    ip_address: '10.0.80.50'
+                })
+            });
+            assert.equal(res.status, 401);
+        });
+    });
+
+    describe('5. Software Inventory Batching', () => {
+        it('accepts 500+ software items cleanly under the 2000 limit', async () => {
+            const softwareList = [];
+            for (let i = 1; i <= 600; i++) {
+                softwareList.push({ name: `App_${i}`, version: `1.${i}.0` });
+            }
+
+            const res = await fetch(`${baseUrl}/api/software`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Agent-Key': process.env.AGENT_API_KEY
+                },
+                body: JSON.stringify({
+                    device_ip: '10.0.80.50',
+                    software: softwareList
+                })
+            });
+
+            assert.equal(res.status, 200);
+            const data = await res.json();
+            assert.equal(data.count, 600);
+        });
+    });
+
+    describe('6. Printer Scan Conflict', () => {
+        it('returns 409 Conflict when printer scan is already running', async () => {
+            const adminToken = jwt.sign(
+                { id: 1, username: 'admin', role: 'admin', token_version: 1 },
+                process.env.JWT_SECRET,
+                { expiresIn: '15m' }
+            );
+
+            // Mock monitor service with isScanning = true
+            app.set('printerMonitorService', {
+                isScanning: true,
+                scanAllPrinters: () => {}
+            });
+
+            const res = await fetch(`${baseUrl}/api/printers/scan`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${adminToken}`,
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            assert.equal(res.status, 409);
+        });
+    });
+
+    describe('7. IPAM CIDR Implementation', () => {
+        it('correctly calculates /24 CIDR', () => {
+            const info = parseCidr('192.168.1.0/24');
+            assert.equal(info.usableHosts, 254);
+            assert.equal(info.firstUsableIp, '192.168.1.1');
+            assert.equal(info.lastUsableIp, '192.168.1.254');
+        });
+
+        it('correctly calculates /23 CIDR spanning both third octets', () => {
+            const info = parseCidr('10.0.80.0/23');
+            assert.equal(info.usableHosts, 510);
+            assert.equal(info.firstUsableIp, '10.0.80.1');
+            assert.equal(info.lastUsableIp, '10.0.81.254');
+        });
+
+        it('correctly calculates /30, /31, /32 CIDRs', () => {
+            const p30 = parseCidr('192.168.1.0/30');
+            assert.equal(p30.usableHosts, 2);
+            assert.equal(p30.firstUsableIp, '192.168.1.1');
+            assert.equal(p30.lastUsableIp, '192.168.1.2');
+
+            const p31 = parseCidr('192.168.1.0/31');
+            assert.equal(p31.usableHosts, 2); // RFC 3021
+            assert.equal(p31.firstUsableIp, '192.168.1.0');
+            assert.equal(p31.lastUsableIp, '192.168.1.1');
+
+            const p32 = parseCidr('192.168.1.5/32');
+            assert.equal(p32.usableHosts, 1);
+            assert.equal(p32.firstUsableIp, '192.168.1.5');
+            assert.equal(p32.lastUsableIp, '192.168.1.5');
+        });
+
+        it('/suggest accepts real /23 CIDR and returns host in second block when first block full', async () => {
+            const adminToken = jwt.sign(
+                { id: 1, username: 'admin', role: 'admin', token_version: 1 },
+                process.env.JWT_SECRET,
+                { expiresIn: '15m' }
+            );
+
+            // Populate all 10.0.80.1 through 10.0.80.255 as occupied
+            testDevices = [];
+            for (let i = 1; i <= 255; i++) {
+                testDevices.push({ ip_address: `10.0.80.${i}`, status: 'online' });
+            }
+
+            const res = await fetch(`${baseUrl}/api/ipam/suggest?subnet=10.0.80.0/23`, {
+                headers: { 'Authorization': `Bearer ${adminToken}` }
+            });
+
+            assert.equal(res.status, 200);
+            const data = await res.json();
+            // Must suggest next host in 10.0.81.x block!
+            assert.equal(data.suggestedIp, '10.0.81.0');
+        });
+
+        it('/suggest returns 400 for invalid CIDR and IPv6', async () => {
+            const adminToken = jwt.sign(
+                { id: 1, username: 'admin', role: 'admin', token_version: 1 },
+                process.env.JWT_SECRET,
+                { expiresIn: '15m' }
+            );
+
+            const resInvalid = await fetch(`${baseUrl}/api/ipam/suggest?subnet=not-a-cidr`, {
+                headers: { 'Authorization': `Bearer ${adminToken}` }
+            });
+            assert.equal(resInvalid.status, 400);
+
+            const resIpv6 = await fetch(`${baseUrl}/api/ipam/suggest?subnet=2001:db8::1`, {
+                headers: { 'Authorization': `Bearer ${adminToken}` }
+            });
+            assert.equal(resIpv6.status, 400);
+            const dataIpv6 = await resIpv6.json();
+            assert.equal(dataIpv6.supported, false);
+        });
+    });
 });

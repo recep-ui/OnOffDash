@@ -98,11 +98,11 @@ The system guarantees a uniform schema for all `device:statusChanged` events acr
 Notification deduplication keys use the real device ID (`offline-${device.id}`), ensuring concurrent failures of multiple devices generate independent notifications without suppression.
 
 ### 3. Separation of Network Ping from Agent Heartbeat
-Network presence and agent health are decoupled:
-* `devices.last_ping_at`: Updated exclusively by successful ICMP ping responses.
-* `devices.last_heartbeat_at`: Updated exclusively by agent telemetry.
-* `devices.agent_status`: `online` or `offline` based on `HEARTBEAT_TIMEOUT_SECONDS`.
-If an endpoint responds to ping but its agent has stopped, the system correctly reports the network status as `online` and the agent status as `offline`.
+Network presence and agent health are strictly decoupled:
+* `devices.status` & `devices.last_ping_at`: Managed exclusively by `PingService` based on ICMP ping reachability. Only `PingService` transitions emit `device:statusChanged`.
+* `devices.agent_status` & `devices.last_heartbeat_at`: Managed exclusively by agent telemetry. Transitions emit `agent:statusChanged`.
+* Heartbeat submissions do **not** mark network status as online or emit network transition events.
+* Newly enrolled devices default to `offline` network state until verified by ICMP ping.
 
 ### 4. Scalable & Atomic Software Inventory Processing
 Software inventory submissions are validated against a 2,000-item ceiling and inserted in atomic batches of 100 items within an explicit MSSQL transaction:
@@ -116,6 +116,28 @@ If any batch fails, the transaction is automatically rolled back, preserving the
 
 ### 5. Atomic Toner Database Updates
 Printer toner updates use atomic transactions (`BEGIN` -> `DELETE` -> `INSERT` -> `COMMIT` / `ROLLBACK`) in both automatic monitoring scans and manual route updates.
+
+### 6. Persistent Session Revocation & HttpOnly Refresh Architecture
+* **In-Memory Access Tokens**: 15-minute access tokens stored exclusively in React memory, never persisted in `localStorage` or `sessionStorage` (XSS mitigation).
+* **HttpOnly Refresh Cookies**: Controlled session renewal via `HttpOnly`, `SameSite=Strict`, `Secure` cookies with database rotation tracking (`user_refresh_tokens`).
+* **Authoritative MSSQL `token_version`**: Token invalidation is persistent in MSSQL `users.token_version`. Shared validation logic (`verifyAccessToken`) ensures both HTTP requests and Socket.IO handshakes reject revoked tokens even across server restarts or cache resets.
+
+### 7. Authoritative Per-Device Agent Credential Binding
+* Per-device Agent keys (`agk_<keyId>.<secret>`) strictly bind telemetry to `authenticatedDeviceId`.
+* Verifies submitted IP matches the credential-bound device; mismatching or unknown IPs are rejected with `403 Forbidden`, closing device impersonation gaps.
+
+### 8. Fully CIDR-Aware IPv4 IPAM Architecture
+* Subnets and available IP generation utilize 32-bit numerical calculations (`ipToLong`, `longToIp`).
+* Arbitrary IPv4 CIDR blocks (`/22`, `/23`, `/24`, `/25`, `/30`, `/31`, `/32`) are supported accurately without octet-boundary assumptions.
+* `/suggest` generates available hosts spanning multi-octet blocks (e.g., `10.0.80.0/23` covers `10.0.80.x` and `10.0.81.x`). Unsupported IPv6 requests return explicit HTTP 400.
+
+### 9. Unified Spreadsheet Infrastructure (ExcelJS)
+* Replaced the deprecated and removed `xlsx` library with `exceljs` across all printer and inventory import/export endpoints.
+* Reuses `backend/utils/excelHelper.js` for cell sanitization (CWE-1236 mitigation), Turkish column normalization, and streaming parsing.
+
+### 10. Least-Privilege Database Lifecycle
+* **db-init container**: Exclusively holds SA credentials to perform DDL, run migrations, and seed bootstrap administrators.
+* **backend runtime**: Connects strictly using restricted application credentials (`onoffdash_app`), validating schema existence without requiring SA or DDL privileges.
 
 ---
 

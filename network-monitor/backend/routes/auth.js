@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcryptjs');
@@ -9,9 +10,15 @@ const {
     requireRole, 
     JWT_SECRET, 
     setUserSession, 
-    invalidateUserSessions, 
     markUserDeleted 
 } = require('../middleware/auth');
+const { 
+    parseCookies, 
+    setRefreshTokenCookie, 
+    clearRefreshTokenCookie 
+} = require('../utils/cookieHelper');
+
+const ACCESS_TOKEN_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '15m';
 
 // Rate limiting on login: max 10 attempts per 15 minutes per IP
 const loginLimiter = rateLimit({
@@ -45,9 +52,8 @@ router.post('/login', loginLimiter, async (req, res) => {
             return res.status(401).json({ error: 'Hatalı kullanıcı adı veya şifre.' });
         }
 
-        // Token oluştur (30 dk geçerli, token_version ve must_change_password claim'leri dahil)
+        // Token oluştur (kısa ömürlü access token: 15-30 dk, token_version ve must_change_password dahil)
         const tokenVersion = user.token_version !== undefined ? user.token_version : 1;
-        const expiresIn = process.env.JWT_EXPIRES_IN || '30m';
         const token = jwt.sign(
             { 
                 id: user.id, 
@@ -57,9 +63,25 @@ router.post('/login', loginLimiter, async (req, res) => {
                 must_change_password: Boolean(user.must_change_password) 
             },
             JWT_SECRET,
-            { expiresIn }
+            { expiresIn: ACCESS_TOKEN_EXPIRES_IN }
         );
 
+        // Güvenli rastgele refresh token üret ve hash'ini DB'ye kaydet
+        const rawRefreshToken = crypto.randomBytes(32).toString('hex');
+        const tokenHash = crypto.createHash('sha256').update(rawRefreshToken).digest('hex');
+
+        try {
+            await pool.query(
+                `INSERT INTO user_refresh_tokens (user_id, token_hash, token_version, expires_at, created_at)
+                 VALUES ($1, $2, $3, DATEADD(day, 7, GETDATE()), GETDATE())`,
+                [user.id, tokenHash, tokenVersion]
+            );
+        } catch (rtErr) {
+            console.warn('Notice: user_refresh_tokens insert:', rtErr.message);
+        }
+
+        // HttpOnly, SameSite=Strict cookie ata (JavaScript erişemez)
+        setRefreshTokenCookie(res, rawRefreshToken);
         setUserSession(user.id, { token_version: tokenVersion, role: user.role });
 
         res.json({
@@ -131,8 +153,24 @@ router.post('/change-password', authenticateToken, async (req, res) => {
         );
         const newTokenVersion = updateResult.rows[0]?.token_version || 2;
 
-        // Şifre güncellendikten sonra kısıtlaması kaldırılmış ve güncel token_version ile yeni bir token üret
-        const expiresIn = process.env.JWT_EXPIRES_IN || '30m';
+        // Eski refresh session'ları iptal et
+        try {
+            await pool.query('UPDATE user_refresh_tokens SET revoked_at = GETDATE() WHERE user_id = $1', [req.user.id]);
+        } catch (_) {}
+
+        // Yeni refresh token üret ve cookie güncelle
+        const rawRefreshToken = crypto.randomBytes(32).toString('hex');
+        const tokenHash = crypto.createHash('sha256').update(rawRefreshToken).digest('hex');
+        try {
+            await pool.query(
+                `INSERT INTO user_refresh_tokens (user_id, token_hash, token_version, expires_at, created_at)
+                 VALUES ($1, $2, $3, DATEADD(day, 7, GETDATE()), GETDATE())`,
+                [req.user.id, tokenHash, newTokenVersion]
+            );
+        } catch (_) {}
+        setRefreshTokenCookie(res, rawRefreshToken);
+
+        // Şifre güncellendikten sonra kısıtlaması kaldırılmış ve güncel token_version ile yeni bir access token üret
         const newToken = jwt.sign(
             { 
                 id: user.id, 
@@ -142,7 +180,7 @@ router.post('/change-password', authenticateToken, async (req, res) => {
                 must_change_password: false 
             },
             JWT_SECRET,
-            { expiresIn }
+            { expiresIn: ACCESS_TOKEN_EXPIRES_IN }
         );
 
         setUserSession(user.id, { token_version: newTokenVersion, role: user.role });
@@ -163,44 +201,102 @@ router.post('/change-password', authenticateToken, async (req, res) => {
     }
 });
 
-// POST /api/auth/refresh — Kısa ömürlü token'ı yenile
-router.post('/refresh', authenticateToken, async (req, res) => {
+// POST /api/auth/refresh — HttpOnly refresh cookie ile oturum/access token yenile (Semantically correct refresh)
+router.post('/refresh', async (req, res) => {
     try {
-        const result = await pool.query(
-            'SELECT id, username, role, token_version, must_change_password FROM users WHERE id = $1',
-            [req.user.id]
-        );
-        const user = result.rows[0];
-        if (!user) {
-            return res.status(401).json({ error: 'Kullanıcı bulunamadı.' });
+        const cookies = parseCookies(req);
+        const rawRefreshToken = cookies.refreshToken || req.body?.refreshToken;
+
+        if (!rawRefreshToken || typeof rawRefreshToken !== 'string') {
+            return res.status(401).json({ error: 'Yenileme belirteci bulunamadı. Lütfen tekrar giriş yapınız.' });
         }
 
-        const tokenVersion = user.token_version !== undefined ? user.token_version : 1;
-        const expiresIn = process.env.JWT_EXPIRES_IN || '30m';
-        const token = jwt.sign(
-            {
-                id: user.id,
-                username: user.username,
-                role: user.role,
-                token_version: tokenVersion,
-                must_change_password: Boolean(user.must_change_password)
-            },
-            JWT_SECRET,
-            { expiresIn }
+        const tokenHash = crypto.createHash('sha256').update(rawRefreshToken).digest('hex');
+
+        const sessionRes = await pool.query(
+            `SELECT r.id, r.user_id, r.token_version, r.expires_at, r.revoked_at,
+                    u.id AS uid, u.username, u.role, u.token_version AS current_token_version, u.must_change_password
+             FROM user_refresh_tokens r
+             JOIN users u ON r.user_id = u.id
+             WHERE r.token_hash = $1`,
+            [tokenHash]
         );
 
+        if (sessionRes.rows.length === 0) {
+            clearRefreshTokenCookie(res);
+            return res.status(401).json({ error: 'Geçersiz veya süresi dolmuş yenileme oturumu.' });
+        }
+
+        const session = sessionRes.rows[0];
+
+        if (session.revoked_at || new Date() > new Date(session.expires_at)) {
+            clearRefreshTokenCookie(res);
+            return res.status(401).json({ error: 'Yenileme oturumu süresi dolmuş veya iptal edilmiş.' });
+        }
+
+        // Token version kontrolü (parola veya rol değiştiyse eski oturum geçersiz)
+        if (Number(session.token_version) < Number(session.current_token_version)) {
+            await pool.query('UPDATE user_refresh_tokens SET revoked_at = GETDATE() WHERE id = $1', [session.id]);
+            clearRefreshTokenCookie(res);
+            return res.status(401).json({ error: 'Oturum sonlandırıldı veya parola değiştirildi. Lütfen tekrar giriş yapınız.' });
+        }
+
+        // Refresh token rotation: eski token'ı iptal et ve yenisini oluştur
+        await pool.query('UPDATE user_refresh_tokens SET revoked_at = GETDATE() WHERE id = $1', [session.id]);
+
+        const nextRefreshToken = crypto.randomBytes(32).toString('hex');
+        const nextHash = crypto.createHash('sha256').update(nextRefreshToken).digest('hex');
+        await pool.query(
+            `INSERT INTO user_refresh_tokens (user_id, token_hash, token_version, expires_at, created_at)
+             VALUES ($1, $2, $3, DATEADD(day, 7, GETDATE()), GETDATE())`,
+            [session.uid, nextHash, session.current_token_version]
+        );
+        setRefreshTokenCookie(res, nextRefreshToken);
+
+        const newAccessToken = jwt.sign(
+            {
+                id: session.uid,
+                username: session.username,
+                role: session.role,
+                token_version: session.current_token_version,
+                must_change_password: Boolean(session.must_change_password)
+            },
+            JWT_SECRET,
+            { expiresIn: ACCESS_TOKEN_EXPIRES_IN }
+        );
+
+        setUserSession(session.uid, { token_version: session.current_token_version, role: session.role });
+
         res.json({
-            token,
+            token: newAccessToken,
             user: {
-                id: user.id,
-                username: user.username,
-                role: user.role,
-                must_change_password: Boolean(user.must_change_password)
+                id: session.uid,
+                username: session.username,
+                role: session.role,
+                must_change_password: Boolean(session.must_change_password)
             }
         });
     } catch (err) {
         console.error('Refresh token error:', err);
+        clearRefreshTokenCookie(res);
         res.status(500).json({ error: 'Token yenilenirken sunucu hatası oluştu.' });
+    }
+});
+
+// POST /api/auth/logout — Oturumu sonlandır ve refresh token'ı iptal et
+router.post('/logout', async (req, res) => {
+    try {
+        const cookies = parseCookies(req);
+        const rawRefreshToken = cookies.refreshToken || req.body?.refreshToken;
+        if (rawRefreshToken) {
+            const tokenHash = crypto.createHash('sha256').update(rawRefreshToken).digest('hex');
+            await pool.query('UPDATE user_refresh_tokens SET revoked_at = GETDATE() WHERE token_hash = $1', [tokenHash]);
+        }
+    } catch (err) {
+        console.error('Logout error:', err);
+    } finally {
+        clearRefreshTokenCookie(res);
+        res.json({ message: 'Başarıyla çıkış yapıldı.' });
     }
 });
 
@@ -313,6 +409,16 @@ router.put('/users/:id', authenticateToken, requireRole('admin'), async (req, re
             role: updatedUser.role 
         });
 
+        if (role || password) {
+            try {
+                await pool.query('UPDATE user_refresh_tokens SET revoked_at = GETDATE() WHERE user_id = $1', [updatedUser.id]);
+            } catch (_) {}
+            const io = req.app.get('io');
+            if (io && typeof io.disconnectUser === 'function') {
+                io.disconnectUser(updatedUser.id);
+            }
+        }
+
         res.json({
             ...updatedUser,
             must_change_password: Boolean(updatedUser.must_change_password)
@@ -337,6 +443,13 @@ router.delete('/users/:id', authenticateToken, requireRole('admin'), async (req,
             return res.status(404).json({ error: 'Kullanıcı bulunamadı.' });
         }
         markUserDeleted(id);
+        try {
+            await pool.query('UPDATE user_refresh_tokens SET revoked_at = GETDATE() WHERE user_id = $1', [id]);
+        } catch (_) {}
+        const io = req.app.get('io');
+        if (io && typeof io.disconnectUser === 'function') {
+            io.disconnectUser(id);
+        }
         res.json({ message: `Kullanıcı '${result.rows[0].username}' başarıyla silindi.` });
     } catch (err) {
         console.error('Delete user error:', err);

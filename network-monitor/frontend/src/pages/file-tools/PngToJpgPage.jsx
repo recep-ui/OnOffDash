@@ -1,3 +1,4 @@
+import { getAccessToken } from '../../services/api';
 import { useState } from 'react';
 import FileDropzone from '../../components/file-tools/FileDropzone';
 import { useNotification } from '../../components/NotificationProvider';
@@ -33,7 +34,7 @@ export default function PngToJpgPage({ onBack }) {
     formData.append('quality', quality);
     formData.append('bg_color', bgColor);
 
-    const token = localStorage.getItem('token');
+    const token = getAccessToken();
     const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
 
     try {

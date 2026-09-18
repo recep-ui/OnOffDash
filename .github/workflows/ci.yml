@@ -29,7 +29,7 @@ jobs:
         working-directory: network-monitor/backend
         run: npm ci
 
-      - name: Syntax & Lint Verification
+      - name: ESLint Verification
         working-directory: network-monitor/backend
         run: npm run lint
 
@@ -37,7 +37,18 @@ jobs:
         working-directory: network-monitor/backend
         run: npm audit --audit-level=high
 
-      - name: Run Backend Tests
+      - name: Backend Startup & Router Import Smoke Test
+        working-directory: network-monitor/backend
+        env:
+          JWT_SECRET: "ci-pipeline-test-jwt-secret-key-at-least-32-chars-long"
+          AGENT_API_KEY: "ci-pipeline-test-agent-key-at-least-32-chars-long"
+          NODE_ENV: test
+        run: |
+          node -e "require('./routes/printers')"
+          node -e "require('./server')"
+          node --test tests/startup_smoke.test.js
+
+      - name: Run Backend Tests (Real Production Routes)
         working-directory: network-monitor/backend
         env:
           JWT_SECRET: "ci-pipeline-test-jwt-secret-key-at-least-32-chars-long"
@@ -89,6 +100,10 @@ jobs:
         working-directory: network-monitor/frontend
         run: npm ci
 
+      - name: ESLint Static Analysis
+        working-directory: network-monitor/frontend
+        run: npm run lint
+
       - name: Dependency Vulnerability Audit (High/Critical Fail Policy)
         working-directory: network-monitor/frontend
         run: npm audit --audit-level=high
@@ -118,19 +133,15 @@ jobs:
           python -m pip install --upgrade pip
           pip install pyjwt cryptography pip-audit
 
-      - name: Audit PDF Service Dependencies
+      - name: Enforced Audit of PDF Service Dependencies
         working-directory: network-monitor/services/pdf-service
         run: |
-          if [ -f requirements.txt ]; then
-            pip-audit -r requirements.txt || echo "pip-audit completed with review flags"
-          fi
+          pip-audit -r requirements.txt --desc
 
-      - name: Audit File Service Dependencies
+      - name: Enforced Audit of File Service Dependencies
         working-directory: network-monitor/services/file-service
         run: |
-          if [ -f requirements.txt ]; then
-            pip-audit -r requirements.txt || echo "pip-audit completed with review flags"
-          fi
+          pip-audit -r requirements.txt --desc
 
       - name: Test PDF Service
         working-directory: network-monitor/services/pdf-service
@@ -143,6 +154,20 @@ jobs:
         env:
           JWT_SECRET: "ci-pipeline-test-jwt-secret-key-at-least-32-chars-long"
         run: python -m unittest discover -s tests -p "test_*.py"
+
+  security-secret-scan:
+    name: Secret Scanning (Gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   security-sast-codeql:
     name: Security SAST (CodeQL)
@@ -160,6 +185,66 @@ jobs:
         uses: github/codeql-action/analyze@v3
         with:
           category: "/language:javascript-typescript,python"
+
+  container-security-scan:
+    name: Container Vulnerability Scanning (Trivy)
+    runs-on: ubuntu-latest
+    needs: [backend-quality, frontend-quality, python-microservices-quality]
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Build Backend Image
+        run: docker build -t onoffdash-backend:test ./network-monitor/backend
+
+      - name: Scan Backend Image
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'onoffdash-backend:test'
+          format: 'table'
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH'
+
+      - name: Build Frontend Image
+        run: docker build -t onoffdash-frontend:test ./network-monitor/frontend
+
+      - name: Scan Frontend Image
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'onoffdash-frontend:test'
+          format: 'table'
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH'
+
+      - name: Build PDF Service Image
+        run: docker build -t onoffdash-pdf:test ./network-monitor/services/pdf-service
+
+      - name: Scan PDF Service Image
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'onoffdash-pdf:test'
+          format: 'table'
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH'
+
+      - name: Build File Service Image
+        run: docker build -t onoffdash-file:test ./network-monitor/services/file-service
+
+      - name: Scan File Service Image
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'onoffdash-file:test'
+          format: 'table'
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH'
 
   docker-validation:
     name: Docker Compose & Deployment Smoke Test

@@ -25,24 +25,30 @@ router.post('/', authenticateAgent, async (req, res) => {
             uptime_seconds
         } = req.body;
 
-        // Per-device kimlik doğrulama yapıldıysa başka bir cihaz adına heartbeat gönderilmesini engelle
+        // Per-device kimlik doğrulama yapıldıysa anahtarın bağlı olduğu cihaz doğrulanmalıdır
         if (req.authenticatedDeviceId) {
-            const devCheck = await pool.query('SELECT id FROM devices WHERE ip_address = $1', [ip_address.trim()]);
-            if (devCheck.rows.length > 0 && devCheck.rows[0].id !== req.authenticatedDeviceId) {
+            const boundDevRes = await pool.query('SELECT id, ip_address FROM devices WHERE id = $1', [req.authenticatedDeviceId]);
+            if (boundDevRes.rows.length === 0) {
+                return res.status(403).json({ 
+                    error: 'Yetkili ajana bağlı cihaz bulunamadı.' 
+                });
+            }
+            const boundDevice = boundDevRes.rows[0];
+            if (boundDevice.ip_address.trim() !== ip_address.trim()) {
                 return res.status(403).json({ 
                     error: 'Yetkili ajan başka bir cihaz adına telemetri bildiremez.' 
                 });
             }
         }
 
-        // 1. Mevcut durumu kontrol et (yalnızca durum değiştiğinde log kaydı oluşturmak için)
+        // 1. Mevcut agent durumunu kontrol et (agent_status geçişinde event yaymak için)
         const existingRes = await pool.query('SELECT id, status, agent_status FROM devices WHERE ip_address = $1', [ip_address]);
-        const previousStatus = existingRes.rows.length > 0 ? existingRes.rows[0].status : null;
-        const previousAgentStatus = existingRes.rows.length > 0 ? existingRes.rows[0].agent_status : 'offline';
-        const isTransition = existingRes.rows.length === 0 || (previousStatus && previousStatus !== 'online');
+        const previousAgentStatus = existingRes.rows.length > 0 ? (existingRes.rows[0].agent_status || 'offline') : 'offline';
         const isAgentTransition = previousAgentStatus !== 'online';
 
         // 2. Cihazı bul veya oluştur (upsert)
+        // NOT: Heartbeat yalnızca agent_status'u yönetir. Ağ erişilebilirliği (status) PingService sorumluluğundadır.
+        // Yeni keşfedilen cihazlarda varsayılan ağ durumu 'offline' atanır.
         const deviceResult = await pool.query(
             `MERGE INTO devices AS target
              USING (VALUES ($1, $2, $3, $4, $5)) AS source (hostname, ip_address, mac_address, os_name, username)
@@ -51,8 +57,8 @@ router.post('/', authenticateAgent, async (req, res) => {
                  UPDATE SET
                      hostname = source.hostname,
                      mac_address = COALESCE(source.mac_address, target.mac_address),
-                     os_name = COALESCE(source.os_name, target.os_name),
-                     username = COALESCE(source.username, target.username),
+                     os_name = COALESCE(NULLIF(source.os_name, ''), target.os_name),
+                     username = COALESCE(NULLIF(source.username, ''), target.username),
                      agent_installed = 1,
                      agent_status = 'online',
                      last_heartbeat_at = GETDATE(),
@@ -60,7 +66,7 @@ router.post('/', authenticateAgent, async (req, res) => {
                      updated_at = GETDATE()
              WHEN NOT MATCHED THEN
                  INSERT (hostname, ip_address, mac_address, os_name, username, agent_installed, agent_status, status, last_heartbeat_at, last_seen, updated_at)
-                 VALUES (source.hostname, source.ip_address, source.mac_address, source.os_name, source.username, 1, 'online', 'online', GETDATE(), GETDATE(), GETDATE())
+                 VALUES (source.hostname, source.ip_address, source.mac_address, source.os_name, source.username, 1, 'online', 'offline', GETDATE(), GETDATE(), GETDATE())
              OUTPUT INSERTED.*;`,
             [hostname, ip_address, mac_address || null, os_name || '', username || '']
         );
@@ -74,32 +80,11 @@ router.post('/', authenticateAgent, async (req, res) => {
             [device.id, cpu_usage || null, ram_usage || null, disk_usage || null, uptime_seconds || null]
         );
 
-        // 4. Durum log kaydı — Yalnızca gerçek durum geçişi olduğunda yaz (online -> online tekrarını engelle)
-        if (isTransition) {
-            await pool.query(
-                `INSERT INTO device_status_logs (device_id, status, checked_at)
-                 VALUES ($1, 'online', GETDATE())`,
-                [device.id]
-            );
-        }
-
-        // 5. Socket.IO ile canlı güncelleme (Kanonik Kontrat)
+        // 4. Socket.IO ile canlı güncelleme (Kanonik Kontrat)
+        // Heartbeat ASLA device:statusChanged yayınlamaz. Sadece agent:statusChanged yayabilir.
         const io = req.app.get('io');
         if (io) {
             io.emit('device:updated', device);
-            if (isTransition) {
-                io.emit('device:statusChanged', {
-                    device: {
-                        id: device.id,
-                        hostname: device.hostname,
-                        ip_address: device.ip_address
-                    },
-                    oldStatus: previousStatus || 'unknown',
-                    newStatus: 'online',
-                    reason: null,
-                    timestamp: new Date().toISOString()
-                });
-            }
             if (isAgentTransition) {
                 io.emit('agent:statusChanged', {
                     device: {

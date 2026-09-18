@@ -1,3 +1,4 @@
+import { getAccessToken } from '../../services/api';
 import { useState } from 'react';
 import FileDropzone from '../../components/file-tools/FileDropzone';
 import { useNotification } from '../../components/NotificationProvider';
@@ -33,7 +34,7 @@ export default function ImageCompressPage({ onBack }) {
     formData.append('quality', quality);
     formData.append('output_format', outputFormat);
 
-    const token = localStorage.getItem('token');
+    const token = getAccessToken();
     const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
 
     try {

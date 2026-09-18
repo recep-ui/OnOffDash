@@ -1,14 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { fetchWithAuth, fetchDevices, downloadFileWithAuth } from '../src/services/api';
+import { fetchWithAuth, fetchDevices, downloadFileWithAuth, setAccessToken } from '../src/services/api';
 
 describe('API Service (Real Production Module)', () => {
   beforeEach(() => {
     localStorage.clear();
+    setAccessToken(null);
     vi.restoreAllMocks();
   });
 
-  it('fetchWithAuth should inject Authorization: Bearer header when token exists in localStorage', async () => {
-    localStorage.setItem('token', 'my-auth-token-xyz');
+  it('fetchWithAuth should inject Authorization: Bearer header when token exists in memory', async () => {
+    setAccessToken('my-auth-token-xyz');
 
     globalThis.fetch = vi.fn().mockResolvedValueOnce({
       ok: true,
@@ -18,13 +19,16 @@ describe('API Service (Real Production Module)', () => {
     await fetchWithAuth('/api/test-endpoint');
 
     expect(globalThis.fetch).toHaveBeenCalledWith('/api/test-endpoint', expect.objectContaining({
+      credentials: 'include',
       headers: expect.objectContaining({
         'Authorization': 'Bearer my-auth-token-xyz',
       })
     }));
   });
 
-  it('fetchWithAuth should not include Authorization header when no token is in localStorage', async () => {
+  it('fetchWithAuth should not include Authorization header when no in-memory token exists', async () => {
+    setAccessToken(null);
+
     globalThis.fetch = vi.fn().mockResolvedValueOnce({
       ok: true,
       json: async () => ({ status: 'ok' }),
@@ -32,8 +36,9 @@ describe('API Service (Real Production Module)', () => {
 
     await fetchWithAuth('/api/public-endpoint');
 
-    const headers = globalThis.fetch.mock.calls[0][1].headers;
-    expect(headers['Authorization']).toBeUndefined();
+    const callArgs = globalThis.fetch.mock.calls[0][1];
+    expect(callArgs.credentials).toBe('include');
+    expect(callArgs.headers['Authorization']).toBeUndefined();
   });
 
   it('fetchDevices should append query parameters correctly', async () => {
@@ -52,7 +57,7 @@ describe('API Service (Real Production Module)', () => {
   });
 
   it('downloadFileWithAuth should parse Content-Disposition filename and trigger anchor download', async () => {
-    localStorage.setItem('token', 'token-for-download');
+    setAccessToken('token-for-download');
 
     const mockBlob = new Blob(['sample data'], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     globalThis.fetch = vi.fn().mockResolvedValueOnce({
@@ -71,6 +76,7 @@ describe('API Service (Real Production Module)', () => {
 
     expect(globalThis.fetch).toHaveBeenCalledWith('/api/devices/export', expect.objectContaining({
       method: 'GET',
+      credentials: 'include',
       headers: expect.objectContaining({
         'Authorization': 'Bearer token-for-download'
       })

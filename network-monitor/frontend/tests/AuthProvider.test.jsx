@@ -22,7 +22,13 @@ describe('AuthProvider Component', () => {
     localStorage.clear();
   });
 
-  it('should initialize with unauthenticated state when localStorage is empty', () => {
+  it('should initialize with unauthenticated state when no active session exists', () => {
+    globalThis.fetch = vi.fn().mockResolvedValueOnce({
+      ok: false,
+      status: 401,
+      json: async () => ({ error: 'Unauthorized' }),
+    });
+
     render(
       <AuthProvider>
         <TestConsumer />
@@ -34,41 +40,60 @@ describe('AuthProvider Component', () => {
     expect(screen.getByTestId('token').textContent).toBe('none');
   });
 
-  it('should load initial credentials from localStorage if present', () => {
-    localStorage.setItem('token', 'initial-jwt-token');
-    localStorage.setItem('user', JSON.stringify({ id: 5, username: 'stored_admin', role: 'admin' }));
+  it('should restore session from HttpOnly cookie refresh on mount if valid', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        token: 'refreshed-jwt-from-cookie',
+        user: { id: 5, username: 'cookie_admin', role: 'admin' },
+      }),
+    });
 
-    render(
-      <AuthProvider>
-        <TestConsumer />
-      </AuthProvider>
-    );
+    await act(async () => {
+      render(
+        <AuthProvider>
+          <TestConsumer />
+        </AuthProvider>
+      );
+    });
 
     expect(screen.getByTestId('auth-status').textContent).toBe('logged-in');
-    expect(screen.getByTestId('username').textContent).toBe('stored_admin');
-    expect(screen.getByTestId('token').textContent).toBe('initial-jwt-token');
+    expect(screen.getByTestId('username').textContent).toBe('cookie_admin');
+    expect(screen.getByTestId('token').textContent).toBe('refreshed-jwt-from-cookie');
+    // Critical security check: token must NEVER be stored in localStorage
+    expect(localStorage.getItem('token')).toBeNull();
   });
 
-  it('should save token and user to localStorage and update state on login()', () => {
+  it('should keep token strictly in memory and NOT persist token to localStorage on login() (XSS protection)', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValueOnce({
+      ok: false,
+      status: 401,
+      json: async () => ({}),
+    });
+
     render(
       <AuthProvider>
         <TestConsumer />
       </AuthProvider>
     );
 
-    act(() => {
+    await act(async () => {
       screen.getByText('Do Login').click();
     });
 
     expect(screen.getByTestId('auth-status').textContent).toBe('logged-in');
     expect(screen.getByTestId('username').textContent).toBe('operator1');
     expect(screen.getByTestId('token').textContent).toBe('token-123');
-    expect(localStorage.getItem('token')).toBe('token-123');
+    // Must NOT be stored in localStorage
+    expect(localStorage.getItem('token')).toBeNull();
   });
 
-  it('should clear localStorage and update state on logout()', () => {
-    localStorage.setItem('token', 'test-token');
-    localStorage.setItem('user', JSON.stringify({ id: 1, username: 'user1' }));
+  it('should clear in-memory credentials and invoke logout endpoint on logout()', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ status: 'ok' }),
+    });
 
     render(
       <AuthProvider>
@@ -76,13 +101,17 @@ describe('AuthProvider Component', () => {
       </AuthProvider>
     );
 
-    act(() => {
+    await act(async () => {
+      screen.getByText('Do Login').click();
+    });
+    expect(screen.getByTestId('auth-status').textContent).toBe('logged-in');
+
+    await act(async () => {
       screen.getByText('Do Logout').click();
     });
 
     expect(screen.getByTestId('auth-status').textContent).toBe('logged-out');
     expect(screen.getByTestId('token').textContent).toBe('none');
     expect(localStorage.getItem('token')).toBeNull();
-    expect(localStorage.getItem('user')).toBeNull();
   });
 });

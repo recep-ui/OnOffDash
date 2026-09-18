@@ -40,7 +40,14 @@ def verify_jwt_token(token: str) -> dict:
             detail="Sunucu güvenlik yapılandırması eksik (JWT_SECRET)."
         )
     try:
-        payload = jwt.decode(token, secret, algorithms=["HS256"])
+        payload = jwt.decode(
+            token,
+            secret,
+            algorithms=["HS256"],
+            options={
+                "require": ["exp"]
+            }
+        )
 
         # Enforce required identity claims (fail-closed)
         user_id = payload.get("id") or payload.get("sub")
@@ -69,6 +76,11 @@ def verify_jwt_token(token: str) -> dict:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Oturum süresi dolmuş."
+        )
+    except jwt.MissingRequiredClaimError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Geçersiz kimlik belirteci: son kullanma tarihi (exp) eksik."
         )
     except jwt.PyJWTError:
         raise HTTPException(

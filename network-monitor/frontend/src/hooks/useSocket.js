@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { io } from 'socket.io-client';
+import { getAccessToken, setAccessToken } from '../services/api';
 
 export function useSocket(tokenParam) {
   const socketRef = useRef(null);
@@ -7,7 +8,7 @@ export function useSocket(tokenParam) {
   const [connected, setConnected] = useState(false);
   const listenersRef = useRef({});
 
-  const activeToken = tokenParam !== undefined ? tokenParam : (typeof window !== 'undefined' ? localStorage.getItem('token') : null);
+  const activeToken = tokenParam !== undefined ? tokenParam : getAccessToken();
 
   useEffect(() => {
     // If no token is available, disconnect and clean up
@@ -53,11 +54,21 @@ export function useSocket(tokenParam) {
       setConnected(false);
     });
 
+    socketInstance.on('auth:revoked', () => {
+      console.warn('🔌 Socket received session revocation.');
+      socketInstance.disconnect();
+      setAccessToken(null);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('auth:logout'));
+      }
+    });
+
     socketInstance.on('connect_error', async (err) => {
       const isAuthError = err && err.message && (
         err.message.includes('Authentication error') ||
         err.message.includes('token required') ||
-        err.message.includes('invalid or expired')
+        err.message.includes('invalid or expired') ||
+        err.message.includes('password change required')
       );
 
       if (isAuthError) {
@@ -71,29 +82,26 @@ export function useSocket(tokenParam) {
           setConnected(false);
         }
 
-        // 2. Invoke token refresh mechanism if token exists
+        // 2. Invoke token refresh mechanism using HttpOnly cookie
         try {
-          const currentToken = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
-          if (currentToken) {
-            const res = await fetch('/api/auth/refresh', {
-              method: 'POST',
-              headers: {
-                'Authorization': `Bearer ${currentToken}`,
-                'Content-Type': 'application/json'
-              }
-            });
+          const res = await fetch('/api/auth/refresh', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            credentials: 'include'
+          });
 
-            if (res.ok) {
-              const data = await res.json();
-              if (data.token) {
-                localStorage.setItem('token', data.token);
-                if (data.user) {
-                  localStorage.setItem('user', JSON.stringify(data.user));
-                }
-                // Dispatch event so application and useSocket re-render with new token
-                window.dispatchEvent(new Event('auth:refreshed'));
-                return;
+          if (res.ok) {
+            const data = await res.json();
+            if (data.token) {
+              setAccessToken(data.token);
+              if (data.user && typeof window !== 'undefined') {
+                localStorage.setItem('user', JSON.stringify(data.user));
               }
+              // Dispatch event so application and useSocket re-render with new token
+              window.dispatchEvent(new CustomEvent('auth:refreshed', { detail: data }));
+              return;
             }
           }
         } catch (refreshErr) {
@@ -101,6 +109,7 @@ export function useSocket(tokenParam) {
         }
 
         // 3. If refresh failed, transition to logged-out state cleanly
+        setAccessToken(null);
         if (typeof window !== 'undefined') {
           localStorage.removeItem('token');
           localStorage.removeItem('user');

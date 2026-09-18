@@ -1,7 +1,17 @@
 const API_BASE = '/api';
 
-function getAuthHeaders(headers = {}) {
-  const token = localStorage.getItem('token');
+let inMemoryAccessToken = null;
+
+export function setAccessToken(token) {
+  inMemoryAccessToken = token;
+}
+
+export function getAccessToken() {
+  return inMemoryAccessToken;
+}
+
+export function getAuthHeaders(headers = {}) {
+  const token = inMemoryAccessToken;
   const authHeaders = { ...headers };
   if (token) {
     authHeaders['Authorization'] = `Bearer ${token}`;
@@ -11,7 +21,34 @@ function getAuthHeaders(headers = {}) {
 
 export async function fetchWithAuth(url, options = {}) {
   const headers = getAuthHeaders(options.headers || {});
-  return fetch(url, { ...options, headers });
+  const res = await fetch(url, { ...options, headers, credentials: 'include' });
+
+  // 401 durumunda HttpOnly refresh cookie ile tek seferlik sessiz yenileme dene
+  if (res.status === 401 && !url.includes('/api/auth/refresh') && !url.includes('/api/auth/login')) {
+    try {
+      const refreshRes = await fetch('/api/auth/refresh', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include'
+      });
+      if (refreshRes.ok) {
+        const data = await refreshRes.json();
+        if (data.token) {
+          setAccessToken(data.token);
+          window.dispatchEvent(new CustomEvent('auth:refreshed', { detail: data }));
+          const retryHeaders = getAuthHeaders(options.headers || {});
+          return fetch(url, { ...options, headers: retryHeaders, credentials: 'include' });
+        }
+      }
+    } catch (_) {}
+
+    setAccessToken(null);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('auth:logout'));
+    }
+  }
+
+  return res;
 }
 
 export async function fetchDevices(params = {}) {
@@ -261,12 +298,13 @@ export async function suggestNextIp(subnet = '') {
  * @param {string} defaultFilename - Fallback filename if Content-Disposition header is missing
  */
 export async function downloadFileWithAuth(url, defaultFilename = 'download.xlsx') {
-  const token = localStorage.getItem('token');
+  const token = getAccessToken();
   const response = await fetch(url, {
     method: 'GET',
     headers: {
       ...(token ? { 'Authorization': `Bearer ${token}` } : {})
-    }
+    },
+    credentials: 'include'
   });
 
   if (!response.ok) {

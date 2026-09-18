@@ -1,3 +1,4 @@
+import { getAccessToken } from '../../services/api';
 import { useState } from 'react';
 import FileDropzone from '../../components/pdf/FileDropzone';
 import { useNotification } from '../../components/NotificationProvider';
@@ -34,7 +35,7 @@ export default function SplitPdfPage({ onBack }) {
     formData.append('file', file);
     formData.append('range_str', rangeStr.trim());
 
-    const token = localStorage.getItem('token');
+    const token = getAccessToken();
     const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
 
     try {

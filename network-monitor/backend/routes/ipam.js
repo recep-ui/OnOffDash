@@ -6,11 +6,10 @@ const {
     longToIp, 
     isIpv6, 
     parseCidr, 
-    getSubnetForIp, 
     getDefaultSubnetPrefix 
 } = require('../utils/ipamUtils');
 
-// Helper to parse IP into Subnet, Prefix and Last Octet (CIDR-aware IPv4 calculation)
+// Helper to parse IP into Subnet, Prefix and numeric Long (CIDR-aware IPv4 calculation)
 function parseIp(ip, customPrefix = 24) {
     if (!ip || typeof ip !== 'string') return null;
     const clean = ip.trim();
@@ -31,19 +30,20 @@ function parseIp(ip, customPrefix = 24) {
     const cidrInfo = parseCidr(`${clean}/${customPrefix}`);
     if (!cidrInfo) return null;
 
-    const parts = clean.split('.');
     return {
         subnet: cidrInfo.subnet,
-        prefix: `${parts[0]}.${parts[1]}.${parts[2]}`,
-        lastOctet: parseInt(parts[3], 10),
+        cidrInfo,
         long,
-        cidrInfo
+        clean
     };
 }
 
 // GET /api/ipam/summary - Alt ağ doluluk oranları ve IP listesi (CIDR-aware)
 router.get('/summary', async (req, res) => {
     try {
+        const prefixParam = req.query.prefix ? parseInt(req.query.prefix, 10) : 24;
+        const groupingPrefix = (!isNaN(prefixParam) && prefixParam >= 1 && prefixParam <= 32) ? prefixParam : 24;
+
         const devicesRes = await pool.query("SELECT id, hostname, ip_address, mac_address, department, status FROM devices");
         const printersRes = await pool.query("SELECT id, name, ip_address, department, is_online FROM printers");
 
@@ -51,23 +51,22 @@ router.get('/summary', async (req, res) => {
 
         // Cihazları işle
         devicesRes.rows.forEach(d => {
-            const parsed = parseIp(d.ip_address);
+            const parsed = parseIp(d.ip_address, groupingPrefix);
             if (parsed && !parsed.isIpv6) {
                 if (!subnetsMap[parsed.subnet]) {
                     subnetsMap[parsed.subnet] = {
                         subnet: parsed.subnet,
-                        prefix: parsed.prefix,
                         cidrInfo: parsed.cidrInfo,
                         occupiedCount: 0,
-                        occupiedList: [],
+                        occupiedLongs: new Set(),
                         devices: []
                     };
                 }
                 subnetsMap[parsed.subnet].occupiedCount++;
-                subnetsMap[parsed.subnet].occupiedList.push(parsed.lastOctet);
+                subnetsMap[parsed.subnet].occupiedLongs.add(parsed.long);
                 subnetsMap[parsed.subnet].devices.push({
                     ip: d.ip_address.trim(),
-                    octet: parsed.lastOctet,
+                    long: parsed.long,
                     name: d.hostname,
                     type: 'device',
                     status: d.status,
@@ -79,23 +78,22 @@ router.get('/summary', async (req, res) => {
 
         // Yazıcıları işle
         printersRes.rows.forEach(p => {
-            const parsed = parseIp(p.ip_address);
+            const parsed = parseIp(p.ip_address, groupingPrefix);
             if (parsed && !parsed.isIpv6) {
                 if (!subnetsMap[parsed.subnet]) {
                     subnetsMap[parsed.subnet] = {
                         subnet: parsed.subnet,
-                        prefix: parsed.prefix,
                         cidrInfo: parsed.cidrInfo,
                         occupiedCount: 0,
-                        occupiedList: [],
+                        occupiedLongs: new Set(),
                         devices: []
                     };
                 }
                 subnetsMap[parsed.subnet].occupiedCount++;
-                subnetsMap[parsed.subnet].occupiedList.push(parsed.lastOctet);
+                subnetsMap[parsed.subnet].occupiedLongs.add(parsed.long);
                 subnetsMap[parsed.subnet].devices.push({
                     ip: p.ip_address.trim(),
-                    octet: parsed.lastOctet,
+                    long: parsed.long,
                     name: p.name,
                     type: 'printer',
                     status: p.is_online ? 'online' : 'offline',
@@ -105,28 +103,32 @@ router.get('/summary', async (req, res) => {
             }
         });
 
-        // Doluluk oranlarını ve boş IP'leri hesapla
+        // Doluluk oranlarını ve sayısal IP aralığından boş IP'leri hesapla
         const subnetsList = Object.values(subnetsMap).map(subnet => {
-            const occupiedSet = new Set(subnet.occupiedList);
             const usableCapacity = subnet.cidrInfo?.usableHosts || 254;
-            const availableOctets = [];
-            for (let i = 1; i <= Math.min(254, usableCapacity); i++) {
-                if (!occupiedSet.has(i)) {
-                    availableOctets.push(i);
+            const availableIps = [];
+
+            if (subnet.cidrInfo) {
+                for (let l = subnet.cidrInfo.firstUsableLong; l <= subnet.cidrInfo.lastUsableLong; l++) {
+                    if (!subnet.occupiedLongs.has(l)) {
+                        availableIps.push(longToIp(l));
+                        if (availableIps.length >= 50) break; // İlk 50 kullanılabilir IP
+                    }
                 }
             }
-            const availableIps = availableOctets.map(oct => `${subnet.prefix}.${oct}`);
-            const occupancyRate = parseFloat(((subnet.occupiedCount / usableCapacity) * 100).toFixed(1));
+
+            const occupancyRate = usableCapacity > 0 
+                ? parseFloat(((subnet.occupiedCount / usableCapacity) * 100).toFixed(1))
+                : 100.0;
 
             return {
                 subnet: subnet.subnet,
-                prefix: subnet.prefix,
                 occupiedCount: subnet.occupiedCount,
                 usableCapacity,
                 occupancyRate,
                 availableCount: Math.max(0, usableCapacity - subnet.occupiedCount),
-                availableIps: availableIps.slice(0, 50), // İlk 50 kullanılabilir IP adresi
-                devices: subnet.devices.sort((a, b) => a.octet - b.octet),
+                availableIps,
+                devices: subnet.devices.sort((a, b) => a.long - b.long),
                 ipv6_supported: false
             };
         });
@@ -148,7 +150,7 @@ router.get('/conflicts', async (req, res) => {
 
         devicesRes.rows.forEach(d => {
             const parsed = parseIp(d.ip_address);
-            if (parsed) {
+            if (parsed && !parsed.isIpv6) {
                 allIps.push({
                     ip: d.ip_address.trim(),
                     type: 'Cihaz',
@@ -162,7 +164,7 @@ router.get('/conflicts', async (req, res) => {
 
         printersRes.rows.forEach(p => {
             const parsed = parseIp(p.ip_address);
-            if (parsed) {
+            if (parsed && !parsed.isIpv6) {
                 allIps.push({
                     ip: p.ip_address.trim(),
                     type: 'Yazıcı',
@@ -193,7 +195,7 @@ router.get('/conflicts', async (req, res) => {
             }
         });
 
-        // 2. MAC Adresi Çakışmaları (Cihazlar arasında aynı MAC adresini kullanan farklı makinalar)
+        // 2. MAC Adresi Çakışmaları
         const macConflicts = [];
         const macGroups = {};
         devicesRes.rows.forEach(d => {
@@ -230,31 +232,52 @@ router.get('/conflicts', async (req, res) => {
     }
 });
 
-// GET /api/ipam/suggest - Alt ağ için ilk kullanılabilir boş IP'yi öner
+// GET /api/ipam/suggest - Alt ağ için ilk kullanılabilir boş IP'yi öner (Arbitrary IPv4 CIDR aware)
 router.get('/suggest', async (req, res) => {
     try {
         const { subnet } = req.query;
 
-        // Tüm aktif IP'leri çek
-        const devRes = await pool.query("SELECT ip_address FROM devices");
-        const priRes = await pool.query("SELECT ip_address FROM printers");
-        
-        const occupied = new Set();
-        devRes.rows.forEach(r => occupied.add(r.ip_address.trim()));
-        priRes.rows.forEach(r => occupied.add(r.ip_address.trim()));
-
-        let targetPrefix = '';
         if (subnet) {
-            const parts = subnet.replace('.0/24', '').split('.');
-            if (parts.length >= 3) {
-                targetPrefix = `${parts[0]}.${parts[1]}.${parts[2]}`;
+            const trimmed = String(subnet).trim();
+            if (isIpv6(trimmed)) {
+                return res.status(400).json({ 
+                    error: 'IPv6 is not supported yet in IPAM calculation', 
+                    isIpv6: true, 
+                    supported: false 
+                });
             }
         }
 
-        // Subnet belirtilmemişse en popüler olanı tahmin et
-        if (!targetPrefix) {
+        // Tüm aktif IP'leri çek ve sayısal long değerlerini Set'e kaydet
+        const devRes = await pool.query("SELECT ip_address FROM devices");
+        const priRes = await pool.query("SELECT ip_address FROM printers");
+        
+        const occupiedLongs = new Set();
+        const allIps = [];
+        [...devRes.rows, ...priRes.rows].forEach(r => {
+            if (r.ip_address) {
+                const clean = r.ip_address.trim();
+                allIps.push(clean);
+                const l = ipToLong(clean);
+                if (l !== null) occupiedLongs.add(l);
+            }
+        });
+
+        let cidrInfo = null;
+
+        if (subnet) {
+            const rawSubnet = String(subnet).trim();
+            const normalizedCidr = rawSubnet.includes('/') ? rawSubnet : `${rawSubnet}/24`;
+            cidrInfo = parseCidr(normalizedCidr);
+            if (!cidrInfo || cidrInfo.error) {
+                return res.status(400).json({ 
+                    error: cidrInfo?.error || 'Geçersiz CIDR veya alt ağ formatı.' 
+                });
+            }
+        } else {
+            // Subnet belirtilmemişse en popüler /24 bloğunu bul veya varsayılanı kullan
             const prefixes = {};
-            occupied.forEach(ip => {
+            allIps.forEach(ip => {
                 const parts = ip.split('.');
                 if (parts.length === 4 && !ip.startsWith('sanal-')) {
                     const pref = `${parts[0]}.${parts[1]}.${parts[2]}`;
@@ -262,20 +285,34 @@ router.get('/suggest', async (req, res) => {
                 }
             });
             const sorted = Object.keys(prefixes).sort((a, b) => prefixes[b] - prefixes[a]);
-            targetPrefix = sorted[0] || getDefaultSubnetPrefix();
+            const targetPrefix = sorted[0] || getDefaultSubnetPrefix();
+            cidrInfo = parseCidr(`${targetPrefix}.0/24`);
         }
 
-        let suggestedIp = '';
-        // 1 ile 254 arasında ilk boşta olanı bul
-        for (let i = 1; i <= 254; i++) {
-            const testIp = `${targetPrefix}.${i}`;
-            if (!occupied.has(testIp)) {
-                suggestedIp = testIp;
+        let suggestedIp = null;
+        for (let l = cidrInfo.firstUsableLong; l <= cidrInfo.lastUsableLong; l++) {
+            if (!occupiedLongs.has(l)) {
+                suggestedIp = longToIp(l);
                 break;
             }
         }
 
-        res.json({ suggestedIp, prefix: targetPrefix });
+        if (!suggestedIp) {
+            return res.status(409).json({
+                error: 'Belirtilen CIDR alt ağında boş IP adresi kalmadı.',
+                subnet: cidrInfo.subnet,
+                usableCapacity: cidrInfo.usableHosts
+            });
+        }
+
+        res.json({ 
+            suggestedIp, 
+            subnet: cidrInfo.subnet, 
+            cidr: cidrInfo.cidr,
+            usableCapacity: cidrInfo.usableHosts,
+            firstUsableIp: cidrInfo.firstUsableIp,
+            lastUsableIp: cidrInfo.lastUsableIp
+        });
     } catch (err) {
         console.error('Error suggesting IP address:', err);
         res.status(500).json({ error: 'IP adresi önerilemedi.' });

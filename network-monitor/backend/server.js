@@ -13,7 +13,7 @@ const PingService = require('./services/pingService');
 const PrinterMonitorService = require('./services/printerMonitorService');
 const CleanupService = require('./services/cleanupService');
 
-const { authenticateToken } = require('./middleware/auth');
+const { authenticateToken, verifyAccessToken } = require('./middleware/auth');
 const authRouter = require('./routes/auth');
 const analyticsRouter = require('./routes/analytics');
 const devicesRouter = require('./routes/devices');
@@ -28,7 +28,7 @@ const phoneDirectoryRouter = require('./routes/phoneDirectory');
 const ipamRouter = require('./routes/ipam');
 
 const helmet = require('helmet');
-const jwt = require('jsonwebtoken');
+const { pool } = require('./db/connection');
 
 const app = express();
 const server = http.createServer(app);
@@ -76,21 +76,35 @@ const io = new Server(server, {
 });
 
 // Socket.IO JWT Authentication Middleware (Strict: auth.token or Authorization header only, NO query token)
-const JWT_SECRET = process.env.JWT_SECRET;
-io.use((socket, next) => {
+// Enforces the EXACT SAME session/token validity rules as REST API (token_version, existence, role, must_change_password)
+io.use(async (socket, next) => {
     const token = socket.handshake.auth?.token || 
                   socket.handshake.headers?.authorization?.replace(/^Bearer\s+/, '');
     if (!token) {
         return next(new Error('Authentication error: token required'));
     }
     try {
-        const decoded = jwt.verify(token, JWT_SECRET);
-        socket.user = decoded;
+        const verifiedUser = await verifyAccessToken(token);
+        if (verifiedUser.must_change_password) {
+            return next(new Error('Authentication error: password change required'));
+        }
+        socket.user = verifiedUser;
         next();
     } catch (err) {
-        return next(new Error('Authentication error: invalid or expired token'));
+        return next(new Error(`Authentication error: ${err.message || 'invalid or expired token'}`));
     }
 });
+
+// Helper to disconnect active sockets when a user's session is revoked
+io.disconnectUser = (userId) => {
+    const targetId = Number(userId);
+    for (const [, socket] of io.sockets.sockets) {
+        if (socket.user && Number(socket.user.id) === targetId) {
+            socket.emit('auth:revoked', { message: 'Oturumunuz sonlandırılmıştır.' });
+            socket.disconnect(true);
+        }
+    }
+};
 
 // Security & Body Parsing Middleware
 app.use(helmet({
@@ -135,11 +149,11 @@ app.get('/api/health', (req, res) => {
 });
 
 // Readiness probe (verifies database connectivity)
-const { poolPromise } = require('./db/connection');
+const dbConnection = require('./db/connection');
 app.get('/api/ready', async (req, res) => {
     try {
-        const pool = await poolPromise;
-        await pool.request().query('SELECT 1 AS ready');
+        const poolInst = await dbConnection.poolPromise;
+        await poolInst.request().query('SELECT 1 AS ready');
         res.json({ status: 'ready', database: 'connected', timestamp: new Date().toISOString() });
     } catch (err) {
         res.status(503).json({ status: 'not_ready', database: 'disconnected', error: err.message });
@@ -164,14 +178,35 @@ async function startServer() {
         // 0. Startup configuration validation
         validateConfig();
 
-        // 1. Veritabanını oluştur/kontrol et
-        await ensureDatabase();
+        // 1. Database readiness and schema validation (least-privilege runtime)
+        const isProduction = process.env.NODE_ENV === 'production';
+        const hasAdminCredentials = Boolean(process.env.DB_ADMIN_PASSWORD || process.env.MSSQL_SA_PASSWORD);
 
-        // 2. Migration'ları çalıştır
-        await runMigrations();
-
-        // 2.1 Güvenli admin bootstrap kontrolü (schema migration tablosundan bağımsız)
-        await ensureBootstrapAdmin();
+        if (!isProduction && hasAdminCredentials) {
+            // Development convenience path only: SA provisioning allowed when explicitly provided
+            console.log('🛠️ [DEV-MODE] Running local database setup and schema migrations...');
+            await ensureDatabase();
+            await runMigrations();
+            await ensureBootstrapAdmin();
+        } else {
+            // Production runtime: Least-privilege application account check.
+            // Architectural responsibility: db-init container performs DDL/migrations with SA privileges.
+            // Backend runtime connects with onoffdash_app and verifies schema readiness.
+            console.log('🔒 [RUNTIME] Connecting with least-privilege application account. Verifying schema readiness...');
+            try {
+                const schemaCheck = await dbConnection.pool.query(
+                    "SELECT COUNT(*) AS count FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME IN ('devices', 'users', 'printers', 'schema_migrations')"
+                );
+                const tableCount = parseInt(schemaCheck.rows[0]?.count || 0, 10);
+                if (tableCount < 4) {
+                    throw new Error(`Required database tables missing (found ${tableCount}/4). Ensure the db-init container has completed successfully.`);
+                }
+                console.log('✅ [RUNTIME] Database schema verified successfully.');
+            } catch (schemaErr) {
+                console.error('❌ FATAL: Database schema readiness check failed:', schemaErr.message);
+                throw schemaErr;
+            }
+        }
 
         const cronTasks = [];
         const intervalHandles = [];

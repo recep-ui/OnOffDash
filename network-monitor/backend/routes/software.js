@@ -38,6 +38,16 @@ router.post('/', authenticateAgent, async (req, res) => {
             }
         }
 
+        // Per-device kimlik doğrulama yapıldıysa anahtarın bağlı olduğu cihaz doğrulanmalıdır
+        if (req.authenticatedDeviceId) {
+            const boundDevRes = await pool.query('SELECT id, ip_address FROM devices WHERE id = $1', [req.authenticatedDeviceId]);
+            if (boundDevRes.rows.length === 0 || boundDevRes.rows[0].ip_address.trim() !== device_ip.trim()) {
+                return res.status(403).json({ 
+                    error: 'Yetkili ajan başka bir cihaz adına yazılım envanteri bildiremez.' 
+                });
+            }
+        }
+
         // Cihazı bul
         const deviceResult = await pool.query(
             'SELECT id FROM devices WHERE ip_address = $1',
@@ -49,13 +59,6 @@ router.post('/', authenticateAgent, async (req, res) => {
         }
 
         const deviceId = deviceResult.rows[0].id;
-
-        // Per-device kimlik doğrulama yapıldıysa başka bir cihaz adına envanter gönderilmesini engelle
-        if (req.authenticatedDeviceId && deviceId !== req.authenticatedDeviceId) {
-            return res.status(403).json({ 
-                error: 'Yetkili ajan başka bir cihaz adına yazılım envanteri bildiremez.' 
-            });
-        }
 
         // Atomik işlem: Tek transaction içinde eski kayıtları sil ve chunk'lar halinde ekle
         const client = await pool.connect();

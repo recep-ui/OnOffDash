@@ -1,3 +1,4 @@
+import { getAccessToken } from '../../services/api';
 import { useState, useEffect } from 'react';
 import FileDropzone from '../../components/file-tools/FileDropzone';
 import { useNotification } from '../../components/NotificationProvider';
@@ -107,7 +108,7 @@ export default function BulkRenamePage({ onBack }) {
     });
     formData.append('rules', JSON.stringify(rulesObj));
 
-    const token = localStorage.getItem('token');
+    const token = getAccessToken();
     const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
 
     try {
