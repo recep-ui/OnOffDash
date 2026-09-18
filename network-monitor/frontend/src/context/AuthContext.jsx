@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback } from 'react';
 
 const AuthContext = createContext(null);
 
@@ -26,6 +26,28 @@ export function AuthProvider({ children }) {
     setToken(null);
     setUser(null);
   }, []);
+
+  // Listen for auth events dispatched by useSocket or API interceptors
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handleLogout = () => {
+      logout();
+    };
+    const handleRefreshed = () => {
+      const newToken = localStorage.getItem('token');
+      const newUserStr = localStorage.getItem('user');
+      if (newToken) setToken(newToken);
+      if (newUserStr) {
+        try { setUser(JSON.parse(newUserStr)); } catch (_) {}
+      }
+    };
+    window.addEventListener('auth:logout', handleLogout);
+    window.addEventListener('auth:refreshed', handleRefreshed);
+    return () => {
+      window.removeEventListener('auth:logout', handleLogout);
+      window.removeEventListener('auth:refreshed', handleRefreshed);
+    };
+  });
 
   return (
     <AuthContext.Provider value={{ token, user, login, logout, isAuthenticated: !!token }}>

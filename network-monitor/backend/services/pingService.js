@@ -5,6 +5,8 @@ class PingService {
     constructor(io) {
         this.io = io;
         this.isScanning = false;
+        this.activePings = new Set();
+        this.concurrency = parseInt(process.env.PING_CONCURRENCY || '25', 10);
     }
 
     async scanAllDevices() {
@@ -25,8 +27,30 @@ class PingService {
                 return;
             }
 
-            const promises = devices.map(device => this.pingDevice(device));
-            await Promise.allSettled(promises);
+            // Bounded concurrency execution with small jitter to prevent thundering herd
+            const concurrency = Math.max(1, this.concurrency);
+            let index = 0;
+            const workers = [];
+
+            const worker = async () => {
+                while (index < devices.length) {
+                    const currentIndex = index++;
+                    const device = devices[currentIndex];
+                    if (!device) continue;
+
+                    // Small jitter between scan starts (5–15ms)
+                    const jitter = Math.floor(Math.random() * 10) + 5;
+                    await new Promise(resolve => setTimeout(resolve, jitter));
+
+                    await this.pingDevice(device);
+                }
+            };
+
+            const workerCount = Math.min(concurrency, devices.length);
+            for (let i = 0; i < workerCount; i++) {
+                workers.push(worker());
+            }
+            await Promise.allSettled(workers);
 
             // Heartbeat timeout kontrolü — agent kurulu cihazlarda
             await this.checkHeartbeatTimeouts();
@@ -43,6 +67,14 @@ class PingService {
     }
 
     async pingDevice(device) {
+        if (!device || !device.ip_address) return;
+
+        // Prevent duplicate simultaneous scans of the same target
+        if (this.activePings.has(device.id)) {
+            return;
+        }
+        this.activePings.add(device.id);
+
         try {
             const res = await ping.promise.probe(device.ip_address, {
                 timeout: 5,
@@ -106,6 +138,8 @@ class PingService {
             }
         } catch (err) {
             console.error(`   ❌ Ping failed for ${device.hostname} (${device.ip_address}):`, err.message);
+        } finally {
+            this.activePings.delete(device.id);
         }
     }
 

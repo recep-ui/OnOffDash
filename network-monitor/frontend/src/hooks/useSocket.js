@@ -53,9 +53,59 @@ export function useSocket(tokenParam) {
       setConnected(false);
     });
 
-    socketInstance.on('connect_error', (err) => {
-      if (err && err.message && err.message.includes('Authentication error')) {
-        console.warn('🔌 Socket authentication failed:', err.message);
+    socketInstance.on('connect_error', async (err) => {
+      const isAuthError = err && err.message && (
+        err.message.includes('Authentication error') ||
+        err.message.includes('token required') ||
+        err.message.includes('invalid or expired')
+      );
+
+      if (isAuthError) {
+        console.warn('🔌 Socket authentication failed. Halting reconnect loop:', err.message);
+
+        // 1. Halt reconnection loop immediately
+        socketInstance.disconnect();
+        if (socketRef.current === socketInstance) {
+          socketRef.current = null;
+          setSocket(null);
+          setConnected(false);
+        }
+
+        // 2. Invoke token refresh mechanism if token exists
+        try {
+          const currentToken = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+          if (currentToken) {
+            const res = await fetch('/api/auth/refresh', {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${currentToken}`,
+                'Content-Type': 'application/json'
+              }
+            });
+
+            if (res.ok) {
+              const data = await res.json();
+              if (data.token) {
+                localStorage.setItem('token', data.token);
+                if (data.user) {
+                  localStorage.setItem('user', JSON.stringify(data.user));
+                }
+                // Dispatch event so application and useSocket re-render with new token
+                window.dispatchEvent(new Event('auth:refreshed'));
+                return;
+              }
+            }
+          }
+        } catch (refreshErr) {
+          console.error('Socket token refresh failed:', refreshErr);
+        }
+
+        // 3. If refresh failed, transition to logged-out state cleanly
+        if (typeof window !== 'undefined') {
+          localStorage.removeItem('token');
+          localStorage.removeItem('user');
+          window.dispatchEvent(new Event('auth:logout'));
+        }
       }
     });
 

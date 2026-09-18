@@ -173,6 +173,10 @@ async function startServer() {
         // 2.1 Güvenli admin bootstrap kontrolü (schema migration tablosundan bağımsız)
         await ensureBootstrapAdmin();
 
+        const cronTasks = [];
+        const intervalHandles = [];
+        const timeoutHandles = [];
+
         // 3. Ping servisini başlat
         const pingService = new PingService(io);
 
@@ -180,43 +184,100 @@ async function startServer() {
         const intervalSeconds = parseInt(process.env.PING_INTERVAL_SECONDS || '60');
         const intervalMs = intervalSeconds * 1000;
 
-        setInterval(() => {
-            pingService.scanAllDevices();
-        }, intervalMs);
+        intervalHandles.push(
+            setInterval(() => {
+                pingService.scanAllDevices();
+            }, intervalMs)
+        );
 
         // İlk ping taramasını 5 saniye sonra başlat
-        setTimeout(() => {
-            pingService.scanAllDevices();
-        }, 5000);
+        timeoutHandles.push(
+            setTimeout(() => {
+                pingService.scanAllDevices();
+            }, 5000)
+        );
 
         // 5. Printer Monitor servisini başlat
         const printerMonitorService = new PrinterMonitorService(io);
         app.set('printerMonitorService', printerMonitorService);
 
         // 6. Periyodik yazıcı taraması (Her 5 dakikada bir)
-        cron.schedule('*/5 * * * *', () => {
-            printerMonitorService.scanAllPrinters();
-        });
+        cronTasks.push(
+            cron.schedule('*/5 * * * *', () => {
+                printerMonitorService.scanAllPrinters();
+            })
+        );
 
         // İlk yazıcı taramasını 10 saniye sonra başlat
-        setTimeout(() => {
-            printerMonitorService.scanAllPrinters();
-        }, 10000);
+        timeoutHandles.push(
+            setTimeout(() => {
+                printerMonitorService.scanAllPrinters();
+            }, 10000)
+        );
 
         // 7. Eski veri temizleme servisi
         const cleanupService = new CleanupService();
 
         // Her gün gece 03:00'te eski kayıtları temizle
-        cron.schedule('0 3 * * *', () => {
-            cleanupService.runCleanup();
-        });
+        cronTasks.push(
+            cron.schedule('0 3 * * *', () => {
+                cleanupService.runCleanup();
+            })
+        );
 
         // İlk temizliği 30 saniye sonra çalıştır
-        setTimeout(() => {
-            cleanupService.runCleanup();
-        }, 30000);
+        timeoutHandles.push(
+            setTimeout(() => {
+                cleanupService.runCleanup();
+            }, 30000)
+        );
 
-        // 8. Sunucuyu başlat
+        // 8. Graceful Shutdown Handlers (SIGTERM, SIGINT)
+        let isShuttingDown = false;
+        const gracefulShutdown = async (signal) => {
+            if (isShuttingDown) return;
+            isShuttingDown = true;
+            console.log(`\n🛑 [${signal}] Graceful shutdown sequence initiated...`);
+
+            // Bounded timeout to prevent hanging process (max 10 seconds)
+            const forceTimer = setTimeout(() => {
+                console.error('⚠️ Graceful shutdown timed out after 10 seconds. Forcing process exit.');
+                process.exit(1);
+            }, 10000);
+            forceTimer.unref();
+
+            try {
+                // Stop cron jobs
+                cronTasks.forEach(task => task && task.stop());
+
+                // Clear intervals and timeouts
+                intervalHandles.forEach(h => clearInterval(h));
+                timeoutHandles.forEach(h => clearTimeout(h));
+
+                // Stop accepting new HTTP requests
+                await new Promise(resolve => server.close(resolve));
+                console.log('✅ HTTP server closed.');
+
+                // Close Socket.IO server and disconnect clients
+                await new Promise(resolve => io.close(resolve));
+                console.log('✅ Socket.IO server closed.');
+
+                // Close MSSQL connection pool
+                await pool.close();
+                console.log('✅ Database connection pool closed.');
+
+                console.log('👋 Graceful shutdown completed cleanly.');
+                process.exit(0);
+            } catch (shutdownErr) {
+                console.error('❌ Error during graceful shutdown:', shutdownErr);
+                process.exit(1);
+            }
+        };
+
+        process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+        process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
+        // 9. Sunucuyu başlat
         const HOST = process.env.SERVER_HOST || '0.0.0.0';
         const PORT = parseInt(process.env.SERVER_PORT || '3001');
 

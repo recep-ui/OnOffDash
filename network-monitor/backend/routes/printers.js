@@ -420,14 +420,24 @@ router.post('/', requireRole('operator'), async (req, res) => {
 
         const printer = printerResult.rows[0];
 
-        // Toner bilgilerini ekle
-        if (toners && Array.isArray(toners)) {
-            for (const toner of toners) {
-                await pool.query(
-                    `INSERT INTO printer_toners (printer_id, color, level, max_capacity, pages_printed)
-                     VALUES ($1, $2, $3, $4, $5)`,
-                    [printer.id, toner.color, toner.level || 0, toner.max_capacity || 100, toner.pages_printed || 0]
-                );
+        // Toner bilgilerini ekle (Transaction içinde atomik olarak)
+        if (toners && Array.isArray(toners) && toners.length > 0) {
+            const client = await pool.connect();
+            try {
+                await client.query('BEGIN TRANSACTION');
+                for (const toner of toners) {
+                    await client.query(
+                        `INSERT INTO printer_toners (printer_id, color, level, max_capacity, pages_printed)
+                         VALUES ($1, $2, $3, $4, $5)`,
+                        [printer.id, toner.color, toner.level || 0, toner.max_capacity || 100, toner.pages_printed || 0]
+                    );
+                }
+                await client.query('COMMIT TRANSACTION');
+            } catch (txErr) {
+                await client.query('ROLLBACK TRANSACTION');
+                throw txErr;
+            } finally {
+                client.release();
             }
         }
 
@@ -497,15 +507,25 @@ router.put('/:id', requireRole('operator'), async (req, res) => {
             return res.status(404).json({ error: 'Printer not found' });
         }
 
-        // Toner bilgilerini güncelle
+        // Toner bilgilerini güncelle (Transaction içinde atomik olarak)
         if (toners && Array.isArray(toners)) {
-            await pool.query('DELETE FROM printer_toners WHERE printer_id = $1', [req.params.id]);
-            for (const toner of toners) {
-                await pool.query(
-                    `INSERT INTO printer_toners (printer_id, color, level, max_capacity, pages_printed)
-                     VALUES ($1, $2, $3, $4, $5)`,
-                    [req.params.id, toner.color, toner.level || 0, toner.max_capacity || 100, toner.pages_printed || 0]
-                );
+            const client = await pool.connect();
+            try {
+                await client.query('BEGIN TRANSACTION');
+                await client.query('DELETE FROM printer_toners WHERE printer_id = $1', [req.params.id]);
+                for (const toner of toners) {
+                    await client.query(
+                        `INSERT INTO printer_toners (printer_id, color, level, max_capacity, pages_printed)
+                         VALUES ($1, $2, $3, $4, $5)`,
+                        [req.params.id, toner.color, toner.level || 0, toner.max_capacity || 100, toner.pages_printed || 0]
+                    );
+                }
+                await client.query('COMMIT TRANSACTION');
+            } catch (txErr) {
+                await client.query('ROLLBACK TRANSACTION');
+                throw txErr;
+            } finally {
+                client.release();
             }
         }
 

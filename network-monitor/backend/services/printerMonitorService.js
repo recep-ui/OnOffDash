@@ -21,6 +21,8 @@ class PrinterMonitorService {
     constructor(io) {
         this.io = io;
         this.isScanning = false;
+        this.activeScans = new Set();
+        this.concurrency = parseInt(process.env.PRINTER_SCAN_CONCURRENCY || '5', 10);
     }
 
     async scanAllPrinters() {
@@ -41,9 +43,30 @@ class PrinterMonitorService {
                 return;
             }
 
-            // Run scans in parallel
-            const promises = printers.map(p => this.scanPrinter(p));
-            await Promise.allSettled(promises);
+            // Bounded concurrency execution with small jitter to prevent connection storms
+            const concurrency = Math.max(1, this.concurrency);
+            let index = 0;
+            const workers = [];
+
+            const worker = async () => {
+                while (index < printers.length) {
+                    const currentIndex = index++;
+                    const printer = printers[currentIndex];
+                    if (!printer) continue;
+
+                    // Staggering/jitter between scan starts (10–30ms)
+                    const jitter = Math.floor(Math.random() * 20) + 10;
+                    await new Promise(resolve => setTimeout(resolve, jitter));
+
+                    await this.scanPrinter(printer);
+                }
+            };
+
+            const workerCount = Math.min(concurrency, printers.length);
+            for (let i = 0; i < workerCount; i++) {
+                workers.push(worker());
+            }
+            await Promise.allSettled(workers);
 
             console.log(`✅ Printer scan completed. ${printers.length} printers checked.`);
             
@@ -58,49 +81,56 @@ class PrinterMonitorService {
     }
 
     async scanPrinter(printer) {
-        let isOnline = false;
-        let model = printer.model || '';
-        let statusText = 'Ready';
-        let hasJam = false;
-        let pageCount = printer.total_page_count || 0;
-        let toners = [];
-        let errorMessage = '';
+        if (!printer || !printer.ip_address) return;
 
-        try {
-            // Try SNMP first
-            const snmpData = await this.getSnmpInfo(printer.ip_address);
-            isOnline = true;
-            model = snmpData.model || model;
-            statusText = snmpData.statusText || statusText;
-            hasJam = snmpData.hasJam || hasJam;
-            pageCount = snmpData.pageCount || pageCount;
-            toners = snmpData.toners || [];
-        } catch (err) {
-            console.log(`   ⚠️ SNMP failed for ${printer.ip_address}, falling back to Web Scraper...`);
-            // Fallback to Web Scraper if SNMP fails or is disabled
-            try {
-                const webData = await this.getWebScraperInfo(printer.ip_address);
-                isOnline = true;
-                model = webData.model || model;
-                toners = webData.toners || toners;
-                // We keep the old page count and status if the web scraper doesn't find them
-                if (webData.pageCount) pageCount = webData.pageCount;
-            } catch (webErr) {
-                errorMessage = `Connection failed (SNMP & Web)`;
-                isOnline = false;
-                statusText = 'Offline';
-            }
+        // Prevent duplicate simultaneous scans of the same target
+        if (this.activeScans.has(printer.id)) {
+            return;
         }
+        this.activeScans.add(printer.id);
 
-        // Update database
         try {
-            const updateRes = await pool.query(
+            let isOnline = false;
+            let model = printer.model || '';
+            let statusText = 'Ready';
+            let hasJam = false;
+            let pageCount = printer.total_page_count || 0;
+            let toners = [];
+            let errorMessage = '';
+
+            try {
+                // Try SNMP first
+                const snmpData = await this.getSnmpInfo(printer.ip_address);
+                isOnline = true;
+                model = snmpData.model || model;
+                statusText = snmpData.statusText || statusText;
+                hasJam = snmpData.hasJam || hasJam;
+                pageCount = snmpData.pageCount || pageCount;
+                toners = snmpData.toners || [];
+            } catch (err) {
+                console.log(`   ⚠️ SNMP failed for ${printer.ip_address}, falling back to Web Scraper...`);
+                // Fallback to Web Scraper if SNMP fails or is disabled
+                try {
+                    const webData = await this.getWebScraperInfo(printer.ip_address);
+                    isOnline = true;
+                    model = webData.model || model;
+                    toners = webData.toners || toners;
+                    // We keep the old page count and status if the web scraper doesn't find them
+                    if (webData.pageCount) pageCount = webData.pageCount;
+                } catch (webErr) {
+                    errorMessage = `Connection failed (SNMP & Web)`;
+                    isOnline = false;
+                }
+            }
+
+            // Update Database with scan results
+            await pool.query(
                 `UPDATE printers SET
                     is_online = $1,
-                    model = $2,
-                    printer_status = $3,
+                    model = CASE WHEN $2 != '' THEN $2 ELSE model END,
+                    status_text = $3,
                     has_paper_jam = $4,
-                    total_page_count = $5,
+                    total_page_count = CASE WHEN $5 > 0 THEN $5 ELSE total_page_count END,
                     error_message = $6,
                     last_updated = GETDATE()
                  OUTPUT INSERTED.*
@@ -108,17 +138,25 @@ class PrinterMonitorService {
                 [isOnline ? 1 : 0, model, statusText, hasJam ? 1 : 0, pageCount, errorMessage, printer.id]
             );
 
-            // Update Toners
+            // Update Toners atomically inside a database transaction
             if (isOnline && toners.length > 0) {
-                // Delete old toners and insert new ones
-                await pool.query('DELETE FROM printer_toners WHERE printer_id = $1', [printer.id]);
-                
-                for (const t of toners) {
-                    await pool.query(
-                        `INSERT INTO printer_toners (printer_id, color, level, max_capacity, pages_printed)
-                         VALUES ($1, $2, $3, $4, $5)`,
-                        [printer.id, t.color, t.level, t.maxCapacity, t.pagesPrinted || 0]
-                    );
+                const client = await pool.connect();
+                try {
+                    await client.query('BEGIN TRANSACTION');
+                    await client.query('DELETE FROM printer_toners WHERE printer_id = $1', [printer.id]);
+                    for (const t of toners) {
+                        await client.query(
+                            `INSERT INTO printer_toners (printer_id, color, level, max_capacity, pages_printed)
+                             VALUES ($1, $2, $3, $4, $5)`,
+                            [printer.id, t.color, t.level, t.maxCapacity, t.pagesPrinted || 0]
+                        );
+                    }
+                    await client.query('COMMIT TRANSACTION');
+                } catch (txErr) {
+                    await client.query('ROLLBACK TRANSACTION');
+                    console.error(`❌ Atomic toner update failed for printer ${printer.id}:`, txErr.message);
+                } finally {
+                    client.release();
                 }
             }
 
@@ -176,6 +214,8 @@ class PrinterMonitorService {
 
         } catch (dbErr) {
             console.error(`❌ DB Update failed for printer ${printer.ip_address}:`, dbErr.message);
+        } finally {
+            this.activeScans.delete(printer.id);
         }
     }
 
