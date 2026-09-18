@@ -82,7 +82,7 @@ async def resize_image_endpoint(
             error_message=str(e),
             user_id=user_id
         )
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="İşlem sırasında sunucu hatası oluştu.")
     finally:
         cleanup_file(file_path)
 
@@ -145,7 +145,7 @@ async def compress_image_endpoint(
             error_message=str(e),
             user_id=user_id
         )
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="İşlem sırasında sunucu hatası oluştu.")
     finally:
         cleanup_file(file_path)
 
@@ -208,7 +208,7 @@ async def png_to_jpg_endpoint(
             error_message=str(e),
             user_id=user_id
         )
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="İşlem sırasında sunucu hatası oluştu.")
     finally:
         cleanup_file(file_path)
 
@@ -264,6 +264,6 @@ async def jpg_to_png_endpoint(
             error_message=str(e),
             user_id=user_id
         )
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="İşlem sırasında sunucu hatası oluştu.")
     finally:
         cleanup_file(file_path)

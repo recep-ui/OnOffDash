@@ -83,7 +83,7 @@ async def create_zip_endpoint(
             error_message=str(e),
             user_id=user_id
         )
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="İşlem sırasında sunucu hatası oluştu.")
     finally:
         for item in saved_items:
             cleanup_file(item["path"])

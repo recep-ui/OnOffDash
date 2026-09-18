@@ -290,6 +290,7 @@ async function runMigrations(customPool = null) {
                         password_hash        VARCHAR(255) NOT NULL,
                         role                 VARCHAR(50) DEFAULT 'viewer',
                         must_change_password BIT DEFAULT 0,
+                        token_version        INT DEFAULT 1,
                         created_at           DATETIME2 DEFAULT GETDATE(),
                         updated_at           DATETIME2 DEFAULT GETDATE()
                     );
@@ -299,6 +300,10 @@ async function runMigrations(customPool = null) {
                     IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('users') AND name = 'must_change_password')
                     BEGIN
                         ALTER TABLE users ADD must_change_password BIT DEFAULT 0;
+                    END
+                    IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('users') AND name = 'token_version')
+                    BEGIN
+                        ALTER TABLE users ADD token_version INT DEFAULT 1;
                     END
                 END
             `);
@@ -369,6 +374,43 @@ async function runMigrations(customPool = null) {
                     CREATE INDEX idx_devices_last_ping ON devices(last_ping_at);
             `);
             await recordMigration('008_separate_ping_heartbeat', 'Separate ping and agent heartbeat timestamps with agent_status column');
+        }
+
+        // --- 009: Per-Device Agent Credentials ---
+        if (!await isMigrationApplied('009_agent_credentials')) {
+            await client.query(`
+                IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'agent_credentials')
+                BEGIN
+                    CREATE TABLE agent_credentials (
+                        id              INT IDENTITY(1,1) PRIMARY KEY,
+                        device_id       INTEGER REFERENCES devices(id) ON DELETE CASCADE,
+                        key_id          VARCHAR(64) UNIQUE NOT NULL,
+                        key_hash        VARCHAR(255) NOT NULL,
+                        is_revoked      BIT DEFAULT 0,
+                        created_at      DATETIME2 DEFAULT GETDATE(),
+                        last_used_at    DATETIME2,
+                        revoked_at      DATETIME2
+                    );
+                END
+
+                IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_agent_credentials_key_id') 
+                    CREATE INDEX idx_agent_credentials_key_id ON agent_credentials(key_id);
+                IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_agent_credentials_device_id') 
+                    CREATE INDEX idx_agent_credentials_device_id ON agent_credentials(device_id);
+            `);
+            await recordMigration('009_agent_credentials', 'Per-device hashed agent credentials table');
+        }
+
+        // --- 010: User Token Invalidation & Session Versioning ---
+        if (!await isMigrationApplied('010_user_token_version')) {
+            await client.query(`
+                IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('users') AND name = 'token_version')
+                BEGIN
+                    ALTER TABLE users ADD token_version INT DEFAULT 1;
+                END
+                UPDATE users SET token_version = 1 WHERE token_version IS NULL;
+            `);
+            await recordMigration('010_user_token_version', 'Token version column for instant server-side JWT session invalidation');
         }
 
         console.log('✅ All database schema migrations verified and up to date.');

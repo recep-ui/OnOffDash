@@ -3,9 +3,16 @@ const router = express.Router();
 const { pool } = require('../db/connection');
 const { authenticateAgent } = require('../middleware/agentAuth');
 
-// POST /api/heartbeat — Agent'tan heartbeat al (Authenticated with AGENT_API_KEY)
+const { validateHeartbeatPayload } = require('../utils/validators');
+
+// POST /api/heartbeat — Agent'tan heartbeat al (Authenticated with AGENT_API_KEY or per-agent key)
 router.post('/', authenticateAgent, async (req, res) => {
     try {
+        const validation = validateHeartbeatPayload(req.body);
+        if (!validation.valid) {
+            return res.status(400).json({ error: validation.error });
+        }
+
         const {
             hostname,
             ip_address,
@@ -18,8 +25,14 @@ router.post('/', authenticateAgent, async (req, res) => {
             uptime_seconds
         } = req.body;
 
-        if (!hostname || !ip_address) {
-            return res.status(400).json({ error: 'hostname and ip_address are required' });
+        // Per-device kimlik doğrulama yapıldıysa başka bir cihaz adına heartbeat gönderilmesini engelle
+        if (req.authenticatedDeviceId) {
+            const devCheck = await pool.query('SELECT id FROM devices WHERE ip_address = $1', [ip_address.trim()]);
+            if (devCheck.rows.length > 0 && devCheck.rows[0].id !== req.authenticatedDeviceId) {
+                return res.status(403).json({ 
+                    error: 'Yetkili ajan başka bir cihaz adına telemetri bildiremez.' 
+                });
+            }
         }
 
         // 1. Mevcut durumu kontrol et (yalnızca durum değiştiğinde log kaydı oluşturmak için)

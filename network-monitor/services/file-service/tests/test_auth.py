@@ -52,5 +52,35 @@ class TestFileAuth(unittest.TestCase):
             asyncio.run(require_authenticated_user(None, None))
         self.assertEqual(ctx.exception.status_code, 401)
 
+    def test_missing_id_claim_rejection(self):
+        token_no_id = jwt.encode(
+            {"username": "anonymous", "role": "operator"},
+            self.secret,
+            algorithm="HS256"
+        )
+        with self.assertRaises(HTTPException) as ctx:
+            verify_jwt_token(token_no_id)
+        self.assertEqual(ctx.exception.status_code, 401)
+
+    def test_missing_role_claim_rejection(self):
+        token_no_role = jwt.encode(
+            {"id": 99, "username": "no_role_user"},
+            self.secret,
+            algorithm="HS256"
+        )
+        with self.assertRaises(HTTPException) as ctx:
+            verify_jwt_token(token_no_role)
+        self.assertEqual(ctx.exception.status_code, 401)
+
+    def test_must_change_password_forbidden(self):
+        token_must_change = jwt.encode(
+            {"id": 99, "username": "new_user", "role": "viewer", "must_change_password": True},
+            self.secret,
+            algorithm="HS256"
+        )
+        with self.assertRaises(HTTPException) as ctx:
+            verify_jwt_token(token_must_change)
+        self.assertEqual(ctx.exception.status_code, 403)
+
 if __name__ == "__main__":
     unittest.main()

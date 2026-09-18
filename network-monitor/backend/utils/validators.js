@@ -59,6 +59,74 @@ function sanitizePagination(query = {}, defaultLimit = 50, maxLimit = 500) {
     return { page, limit, offset };
 }
 
+/**
+ * Validates agent heartbeat incoming payload schema.
+ * Rejects oversized, missing, or malformed metrics and identifiers before DB operations.
+ */
+function validateHeartbeatPayload(data) {
+    if (!data || typeof data !== 'object') {
+        return { valid: false, error: 'Request body must be a JSON object' };
+    }
+
+    const { hostname, ip_address, mac_address, cpu_usage, ram_usage, disk_usage, uptime_seconds } = data;
+
+    if (!hostname || typeof hostname !== 'string' || hostname.trim().length === 0 || hostname.trim().length > 255 || !isValidHostname(hostname.trim())) {
+        return { valid: false, error: 'Invalid or missing hostname (must be a valid RFC hostname up to 255 characters)' };
+    }
+
+    if (!ip_address || typeof ip_address !== 'string' || !isValidIP(ip_address.trim())) {
+        return { valid: false, error: 'Invalid or missing ip_address (must be valid IPv4 or IPv6)' };
+    }
+
+    if (mac_address && (typeof mac_address !== 'string' || !isValidMAC(mac_address.trim()))) {
+        return { valid: false, error: 'Invalid mac_address format' };
+    }
+
+    for (const [metric, val] of Object.entries({ cpu_usage, ram_usage, disk_usage })) {
+        if (val !== undefined && val !== null && val !== '') {
+            const num = Number(val);
+            if (isNaN(num) || num < 0 || num > 100) {
+                return { valid: false, error: `${metric} must be a numeric value between 0 and 100` };
+            }
+        }
+    }
+
+    if (uptime_seconds !== undefined && uptime_seconds !== null && uptime_seconds !== '') {
+        const uptime = Number(uptime_seconds);
+        if (!Number.isInteger(uptime) || uptime < 0) {
+            return { valid: false, error: 'uptime_seconds must be a non-negative integer' };
+        }
+    }
+
+    return { valid: true };
+}
+
+/**
+ * Validates agent software inventory payload schema.
+ */
+function validateSoftwarePayload(device_ip, software, maxItems = 2000) {
+    if (!device_ip || typeof device_ip !== 'string' || !isValidIP(device_ip.trim())) {
+        return { valid: false, status: 400, error: 'Valid device_ip (IPv4 or IPv6) is required' };
+    }
+
+    if (!Array.isArray(software)) {
+        return { valid: false, status: 400, error: 'software must be an array' };
+    }
+
+    if (software.length > maxItems) {
+        return { valid: false, status: 413, error: `Software inventory exceeds maximum allowed limit of ${maxItems} items` };
+    }
+
+    for (let i = 0; i < software.length; i++) {
+        const sw = software[i];
+        if (!sw || typeof sw !== 'object' || typeof sw.name !== 'string' || sw.name.trim() === '') {
+            return { valid: false, status: 400, error: `Malformed software item at index ${i}: name must be a non-empty string` };
+        }
+    }
+
+    return { valid: true, status: 200 };
+}
+
 module.exports = {
     isValidIPv4,
     isValidIPv6,
@@ -66,5 +134,7 @@ module.exports = {
     isValidMAC,
     isValidHostname,
     isValidPort,
-    sanitizePagination
+    sanitizePagination,
+    validateHeartbeatPayload,
+    validateSoftwarePayload
 };

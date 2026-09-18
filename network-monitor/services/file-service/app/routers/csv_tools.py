@@ -60,7 +60,7 @@ async def analyze_csv_endpoint(
             error_message=str(e),
             user_id=user_id
         )
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="İşlem sırasında sunucu hatası oluştu.")
     finally:
         cleanup_file(file_path)
 
@@ -133,6 +133,6 @@ async def fix_csv_endpoint(
             error_message=str(e),
             user_id=user_id
         )
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="İşlem sırasında sunucu hatası oluştu.")
     finally:
         cleanup_file(file_path)

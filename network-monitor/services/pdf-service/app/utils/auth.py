@@ -27,7 +27,7 @@ security = HTTPBearer(auto_error=False)
 JWT_SECRET = os.getenv("JWT_SECRET")
 
 def verify_jwt_token(token: str) -> dict:
-    """Verifies and decodes a JWT token against JWT_SECRET."""
+    """Verifies and decodes a JWT token against JWT_SECRET, enforcing required identity claims."""
     secret = os.getenv("JWT_SECRET") or JWT_SECRET
     if not token:
         raise HTTPException(
@@ -41,7 +41,30 @@ def verify_jwt_token(token: str) -> dict:
         )
     try:
         payload = jwt.decode(token, secret, algorithms=["HS256"])
+
+        # Enforce required identity claims (fail-closed)
+        user_id = payload.get("id") or payload.get("sub")
+        role = payload.get("role")
+
+        if user_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Geçersiz kimlik belirteci: kullanıcı kimliği (id/sub) eksik."
+            )
+        if not role or not isinstance(role, str):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Geçersiz kimlik belirteci: kullanıcı rolü eksik."
+            )
+        if payload.get("must_change_password") is True:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Parola değiştirilmesi gerekmektedir."
+            )
+
         return payload
+    except HTTPException:
+        raise
     except jwt.ExpiredSignatureError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

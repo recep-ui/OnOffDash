@@ -15,16 +15,28 @@ app = FastAPI(
 )
 
 # CORS setup
-cors_origins_str = os.getenv("CORS_ORIGINS", "*")
-if cors_origins_str == "*":
-    origins = ["*"]
-else:
+is_prod = os.getenv("APP_ENV") == "production" or os.getenv("NODE_ENV") == "production"
+cors_origins_str = os.getenv("CORS_ORIGINS")
+
+if is_prod:
+    if not cors_origins_str or not cors_origins_str.strip():
+        raise RuntimeError("FATAL: CORS_ORIGINS environment variable is mandatory in production.")
     origins = [o.strip() for o in cors_origins_str.split(",") if o.strip()]
+    if "*" in origins:
+        raise RuntimeError("FATAL: Wildcard CORS origin (*) is forbidden in production.")
+    allow_credentials = True
+else:
+    if not cors_origins_str or cors_origins_str == "*":
+        origins = ["*"]
+        allow_credentials = False  # Wildcards must never be combined with credentials
+    else:
+        origins = [o.strip() for o in cors_origins_str.split(",") if o.strip()]
+        allow_credentials = True
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
-    allow_credentials=True,
+    allow_credentials=allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )

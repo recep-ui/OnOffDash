@@ -81,4 +81,77 @@ router.get('/changelog', authenticateAgent, (req, res) => {
     }
 });
 
+const { authenticateToken, requireRole } = require('../middleware/auth');
+const { pool } = require('../db/connection');
+
+// POST /api/agent/enroll — Yeni cihaz ajanı için benzersiz kimlik bilgisi üret (Operator/Admin)
+router.post('/enroll', authenticateToken, requireRole('operator'), async (req, res) => {
+    try {
+        const { device_id, device_ip } = req.body;
+        if (!device_id && !device_ip) {
+            return res.status(400).json({ error: 'device_id veya device_ip parametresi zorunludur.' });
+        }
+
+        let targetDeviceId = device_id;
+        if (!targetDeviceId && device_ip) {
+            const devRes = await pool.query('SELECT id FROM devices WHERE ip_address = $1', [device_ip.trim()]);
+            if (devRes.rows.length === 0) {
+                return res.status(404).json({ error: 'Kayıt edilecek hedef cihaz bulunamadı.' });
+            }
+            targetDeviceId = devRes.rows[0].id;
+        }
+
+        // Benzersiz key_id ve secret üret
+        const keyId = `agk_${crypto.randomBytes(8).toString('hex')}`;
+        const secret = crypto.randomBytes(32).toString('hex');
+        const keyHash = crypto.createHash('sha256').update(secret).digest('hex');
+
+        // Veritabanına kaydet: Secret asla saklanmaz, yalnızca SHA-256 hash'i saklanır
+        await pool.query(
+            `INSERT INTO agent_credentials (device_id, key_id, key_hash, is_revoked, created_at)
+             VALUES ($1, $2, $3, 0, GETDATE())`,
+            [targetDeviceId, keyId, keyHash]
+        );
+
+        // Cihazın agent_installed durumunu güncelle
+        await pool.query('UPDATE devices SET agent_installed = 1, updated_at = GETDATE() WHERE id = $1', [targetDeviceId]);
+
+        const fullKey = `${keyId}.${secret}`;
+
+        res.status(201).json({
+            message: 'Ajan başarıyla kaydedildi.',
+            device_id: targetDeviceId,
+            key_id: keyId,
+            agent_key: fullKey,
+            note: 'Bu anahtarı ajanın .env dosyasında AGENT_API_KEY olarak yapılandırın. Gizli anahtar tekrar görüntülenemez.'
+        });
+    } catch (err) {
+        console.error('Error enrolling agent:', err);
+        res.status(500).json({ error: 'Ajan kaydı oluşturulamadı.' });
+    }
+});
+
+// POST /api/agent/revoke/:keyId — Belirtilen ajan anahtarını iptal et (Admin)
+router.post('/revoke/:keyId', authenticateToken, requireRole('admin'), async (req, res) => {
+    try {
+        const { keyId } = req.params;
+        const result = await pool.query(
+            `UPDATE agent_credentials 
+             SET is_revoked = 1, revoked_at = GETDATE() 
+             OUTPUT INSERTED.key_id, INSERTED.device_id
+             WHERE key_id = $1`,
+            [keyId]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Ajan kimlik kaydı bulunamadı.' });
+        }
+
+        res.json({ message: `Ajan anahtarı (${keyId}) başarıyla iptal edildi.`, credential: result.rows[0] });
+    } catch (err) {
+        console.error('Error revoking agent credential:', err);
+        res.status(500).json({ error: 'Ajan anahtarı iptal edilemedi.' });
+    }
+});
+
 module.exports = router;

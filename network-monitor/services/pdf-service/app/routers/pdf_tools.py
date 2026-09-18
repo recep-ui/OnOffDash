@@ -61,7 +61,7 @@ async def get_preview(file: UploadFile = File(...), user: dict = Depends(require
             error_message=str(e),
             user_id=user_id
         )
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="İşlem sırasında sunucu hatası oluştu.")
     finally:
         if file_path:
             cleanup_file(file_path)
@@ -136,7 +136,7 @@ async def merge_files(files: list[UploadFile] = File(...), user: dict = Depends(
             error_message=str(e),
             user_id=user_id
         )
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="İşlem sırasında sunucu hatası oluştu.")
     finally:
         for path in saved_paths:
             cleanup_file(path)
@@ -206,7 +206,7 @@ async def split_file(file: UploadFile = File(...), range_str: str = Form(...), u
             error_message=str(e),
             user_id=user_id
         )
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="İşlem sırasında sunucu hatası oluştu.")
     finally:
         if file_path:
             cleanup_file(file_path)
@@ -284,7 +284,7 @@ async def reorder_file(file: UploadFile = File(...), page_configs: str = Form(..
             error_message=str(e),
             user_id=user_id
         )
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="İşlem sırasında sunucu hatası oluştu.")
     finally:
         if file_path:
             cleanup_file(file_path)
@@ -357,7 +357,7 @@ async def compress_file(file: UploadFile = File(...), quality: str = Form("mediu
             error_message=str(e),
             user_id=user_id
         )
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="İşlem sırasında sunucu hatası oluştu.")
     finally:
         if file_path:
             cleanup_file(file_path)
@@ -443,7 +443,7 @@ async def watermark_file(
             error_message=str(e),
             user_id=user_id
         )
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="İşlem sırasında sunucu hatası oluştu.")
     finally:
         if file_path:
             cleanup_file(file_path)

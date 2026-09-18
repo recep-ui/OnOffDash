@@ -37,15 +37,28 @@ const server = http.createServer(app);
 app.set('trust proxy', 1);
 
 // Standardized CORS_ORIGINS configuration
+const isProd = process.env.NODE_ENV === 'production';
 const rawOrigins = process.env.CORS_ORIGINS || process.env.CORS_ORIGIN;
-const allowedOrigins = rawOrigins 
-    ? rawOrigins.split(',').map(s => s.trim()).filter(Boolean)
-    : ['http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:80', 'http://localhost:3000', 'http://localhost'];
+let allowedOrigins = [];
+
+if (rawOrigins) {
+    allowedOrigins = rawOrigins.split(',').map(s => s.trim()).filter(Boolean);
+    if (isProd && allowedOrigins.includes('*')) {
+        throw new Error('FATAL: Wildcard CORS origin (*) is forbidden in production.');
+    }
+} else if (isProd) {
+    throw new Error('FATAL: CORS_ORIGINS environment variable is mandatory in production.');
+} else {
+    allowedOrigins = ['http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:80', 'http://localhost:3000', 'http://localhost'];
+}
 
 const corsOptions = {
     origin: (origin, callback) => {
         if (!origin) return callback(null, true);
-        if (allowedOrigins.includes('*') || allowedOrigins.includes(origin)) {
+        if (!isProd && allowedOrigins.includes('*')) {
+            return callback(null, true);
+        }
+        if (allowedOrigins.includes(origin)) {
             return callback(null, true);
         }
         return callback(new Error(`CORS blocked for origin: ${origin}`));
@@ -56,7 +69,7 @@ const corsOptions = {
 
 const io = new Server(server, {
     cors: {
-        origin: allowedOrigins.includes('*') ? '*' : allowedOrigins,
+        origin: (!isProd && allowedOrigins.includes('*')) ? '*' : allowedOrigins,
         methods: ['GET', 'POST', 'PUT', 'DELETE'],
         credentials: true
     }
@@ -81,7 +94,19 @@ io.use((socket, next) => {
 
 // Security & Body Parsing Middleware
 app.use(helmet({
-    contentSecurityPolicy: false,
+    contentSecurityPolicy: {
+        directives: {
+            defaultSrc: ["'self'"],
+            scriptSrc: ["'self'"],
+            styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+            fontSrc: ["'self'", "https://fonts.gstatic.com", "data:"],
+            imgSrc: ["'self'", "data:", "blob:"],
+            connectSrc: ["'self'", "ws:", "wss:"],
+            objectSrc: ["'none'"],
+            baseUri: ["'self'"],
+            frameAncestors: ["'none'"]
+        }
+    },
     crossOriginEmbedderPolicy: false
 }));
 app.use(cors(corsOptions));

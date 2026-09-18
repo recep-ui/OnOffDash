@@ -33,6 +33,18 @@ function validateConfig(options = { exitOnError: true }) {
         }
     }
 
+    const corsOrigins = process.env.CORS_ORIGINS || process.env.CORS_ORIGIN;
+    if (isProd) {
+        if (!corsOrigins || typeof corsOrigins !== 'string' || corsOrigins.trim() === '') {
+            errors.push('CORS_ORIGINS is mandatory in production.');
+        } else {
+            const originsList = corsOrigins.split(',').map(s => s.trim()).filter(Boolean);
+            if (originsList.includes('*')) {
+                errors.push('Wildcard CORS origin (*) is forbidden in production.');
+            }
+        }
+    }
+
     if (errors.length > 0) {
         console.error('❌ FATAL CONFIGURATION ERRORS:');
         errors.forEach(err => console.error(`   - ${err}`));

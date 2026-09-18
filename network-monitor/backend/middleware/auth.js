@@ -17,9 +17,40 @@ const ROLE_HIERARCHY = {
     viewer: 1
 };
 
+const { pool } = require('../db/connection');
+
+// In-memory session tracking for instant revocation and high-performance validation
+// Map<userId, { token_version: number, role: string, deleted: boolean }>
+const sessionCache = new Map();
+
+function setUserSession(userId, { token_version, role, deleted = false }) {
+    sessionCache.set(Number(userId), {
+        token_version: token_version !== undefined ? Number(token_version) : 1,
+        role: role ? String(role).toLowerCase() : undefined,
+        deleted: Boolean(deleted)
+    });
+}
+
+function invalidateUserSessions(userId) {
+    const current = sessionCache.get(Number(userId)) || { token_version: 1 };
+    sessionCache.set(Number(userId), {
+        ...current,
+        token_version: (current.token_version || 1) + 1
+    });
+}
+
+function markUserDeleted(userId) {
+    sessionCache.set(Number(userId), { deleted: true });
+}
+
+function clearSessionCache() {
+    sessionCache.clear();
+}
+
 /**
  * Express middleware to authenticate requests using JWT in Authorization header.
  * Rejects any query-string token parameter to prevent token leakage in URLs and logs.
+ * Enforces server-side session invalidation (token_version, role change, user deletion).
  */
 function authenticateToken(req, res, next) {
     const authHeader = req.headers['authorization'];
@@ -29,14 +60,31 @@ function authenticateToken(req, res, next) {
         return res.status(401).json({ error: 'Erişim engellendi. Giriş yapılması gerekiyor.' });
     }
 
-    jwt.verify(token, process.env.JWT_SECRET || JWT_SECRET, (err, user) => {
+    jwt.verify(token, process.env.JWT_SECRET || JWT_SECRET, (err, decoded) => {
         if (err) {
-            return res.status(403).json({ error: 'Geçersiz veya süresi dolmuş oturum anahtarı.' });
+            return res.status(401).json({ error: 'Geçersiz veya süresi dolmuş oturum anahtarı.' });
         }
-        req.user = user;
+
+        const userId = Number(decoded.id);
+
+        // Instant session invalidation check against session cache
+        if (userId && sessionCache.has(userId)) {
+            const cached = sessionCache.get(userId);
+            if (cached.deleted) {
+                return res.status(401).json({ error: 'Kullanıcı hesabı bulunamadı veya silinmiştir.' });
+            }
+            if (decoded.token_version !== undefined && cached.token_version !== undefined && Number(decoded.token_version) < Number(cached.token_version)) {
+                return res.status(401).json({ error: 'Oturum sonlandırıldı veya parola değiştirildi. Lütfen tekrar giriş yapınız.' });
+            }
+            if (cached.role && decoded.role && cached.role !== decoded.role.toLowerCase()) {
+                return res.status(401).json({ error: 'Kullanıcı rolü güncellenmiştir. Lütfen tekrar giriş yapınız.' });
+            }
+        }
+
+        req.user = decoded;
 
         // Enforce password change restriction: only /api/auth/me and /api/auth/change-password allowed
-        if (user.must_change_password) {
+        if (decoded.must_change_password) {
             const requestPath = req.originalUrl ? req.originalUrl.split('?')[0] : ((req.baseUrl || '') + (req.path || ''));
             const allowedPaths = ['/api/auth/me', '/api/auth/change-password'];
             const isAllowed = allowedPaths.some(p => requestPath === p || requestPath.endsWith(p));
@@ -91,5 +139,9 @@ module.exports = {
     authenticateToken,
     requireRole,
     JWT_SECRET: process.env.JWT_SECRET || JWT_SECRET,
-    ROLE_HIERARCHY
+    ROLE_HIERARCHY,
+    setUserSession,
+    invalidateUserSessions,
+    markUserDeleted,
+    clearSessionCache
 };

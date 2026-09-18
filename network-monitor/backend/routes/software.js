@@ -50,6 +50,13 @@ router.post('/', authenticateAgent, async (req, res) => {
 
         const deviceId = deviceResult.rows[0].id;
 
+        // Per-device kimlik doğrulama yapıldıysa başka bir cihaz adına envanter gönderilmesini engelle
+        if (req.authenticatedDeviceId && deviceId !== req.authenticatedDeviceId) {
+            return res.status(403).json({ 
+                error: 'Yetkili ajan başka bir cihaz adına yazılım envanteri bildiremez.' 
+            });
+        }
+
         // Atomik işlem: Tek transaction içinde eski kayıtları sil ve chunk'lar halinde ekle
         const client = await pool.connect();
         try {
