@@ -83,7 +83,7 @@ npm install
 cp .env.example .env
 # .env dosyasında DB_HOST, DB_USER, DB_PASSWORD, JWT_SECRET, AGENT_API_KEY ayarlayın
 
-npm test     # 20 adet otomatik test çalıştırılır
+npm test     # 93 adet otomatik birim/entegrasyon testi çalıştırılır
 npm start    # Sunucu Port 3001'de başlar
 ```
 
@@ -92,11 +92,24 @@ npm start    # Sunucu Port 3001'de başlar
 ```bash
 cd network-monitor/frontend
 npm install
+npm test     # 23 adet Vitest + React Testing Library testi çalıştırılır
+npm run build # Üretim paketi derlenir (dist/)
 npm run dev  # Vite geliştirici sunucusu Port 5173'te açılır
-# Üretim paketi derlemek için: npm run build
 ```
 
-### 3. Mikroservisler (PDF & Dosya Araçları)
+### 3. Üretim Ortamı (HTTPS / TLS Kurulumu)
+
+Üretim ortamında HTTPS çalıştırmak için:
+```bash
+# 1. Sertifikaları certs/ dizinine yerleştirin veya self-signed oluşturun:
+./scripts/generate_self_signed_cert.sh
+
+# 2. Production override compose dosyasını başlatın:
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+```
+Tüm HTTP istekleri otomatik olarak HTTPS (Port 443) adresine yönlendirilir ve HSTS uygulanır.
+
+### 4. Mikroservisler (PDF & Dosya Araçları)
 
 ```bash
 # PDF Servisi

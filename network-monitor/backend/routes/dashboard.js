@@ -2,9 +2,12 @@ const express = require('express');
 const router = express.Router();
 const { pool } = require('../db/connection');
 
+const { getLowTonerThreshold } = require('../utils/tonerConfig');
+
 // GET /api/dashboard/stats — Dashboard istatistikleri
 router.get('/stats', async (req, res) => {
     try {
+        const lowTonerThreshold = getLowTonerThreshold();
         const totalResult = await pool.query('SELECT COUNT(*) as count FROM devices');
         const onlineResult = await pool.query(`SELECT COUNT(*) as count FROM devices WHERE status = 'online'`);
         const offlineResult = await pool.query(`SELECT COUNT(*) as count FROM devices WHERE status = 'offline'`);
@@ -16,15 +19,15 @@ router.get('/stats', async (req, res) => {
         const printerOnlineResult = await pool.query(`SELECT COUNT(*) as count FROM printers WHERE is_online = 1`);
         const printerJamResult = await pool.query(`SELECT COUNT(*) as count FROM printers WHERE has_paper_jam = 1`);
 
-        // Düşük toner kontrolü — herhangi bir toneri %10 altında olan yazıcı sayısı
+        // Düşük toner kontrolü — herhangi bir toneri eşik (%LOW_TONER_THRESHOLD_PERCENT) altında olan yazıcı sayısı
         const lowTonerResult = await pool.query(`
             SELECT COUNT(DISTINCT p.id) as count
             FROM printers p
             INNER JOIN printer_toners pt ON pt.printer_id = p.id
             WHERE p.is_online = 1
               AND pt.max_capacity > 0
-              AND (CAST(pt.level AS FLOAT) / CAST(pt.max_capacity AS FLOAT)) * 100 < 10
-        `);
+              AND (CAST(pt.level AS FLOAT) / CAST(pt.max_capacity AS FLOAT)) * 100 < $1
+        `, [lowTonerThreshold]);
 
         res.json({
             devices: {

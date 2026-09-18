@@ -1,0 +1,30 @@
+# OnOffDash V2 — Production HTTPS Deployment Compose Override
+# Usage: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+
+services:
+  backend:
+    environment:
+      - NODE_ENV=production
+      - CORS_ORIGINS=${CORS_ORIGINS}
+      - SNMP_COMMUNITY=${SNMP_COMMUNITY}
+      - LOW_TONER_THRESHOLD_PERCENT=${LOW_TONER_THRESHOLD_PERCENT:-10}
+      - PING_CONCURRENCY=${PING_CONCURRENCY:-25}
+      - PRINTER_SCAN_CONCURRENCY=${PRINTER_SCAN_CONCURRENCY:-5}
+
+  pdf-service:
+    environment:
+      - APP_ENV=production
+      - CORS_ORIGINS=${CORS_ORIGINS}
+
+  file-service:
+    environment:
+      - APP_ENV=production
+      - CORS_ORIGINS=${CORS_ORIGINS}
+
+  frontend:
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./frontend/nginx.prod-ssl.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./certs:/etc/nginx/ssl:ro

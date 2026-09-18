@@ -2,6 +2,7 @@ const snmp = require('net-snmp');
 const axios = require('axios');
 const cheerio = require('cheerio');
 const { pool } = require('../db/connection');
+const { getLowTonerThreshold } = require('../utils/tonerConfig');
 
 // Standard Printer MIB OIDs
 const OID_SUPPLY_DESCRIPTION = "1.3.6.1.2.1.43.11.1.1.6";
@@ -99,8 +100,8 @@ class PrinterMonitorService {
             let errorMessage = '';
 
             try {
-                // Try SNMP first
-                const snmpData = await this.getSnmpInfo(printer.ip_address);
+                // Try SNMP first (with per-printer config or centralized SNMP_COMMUNITY)
+                const snmpData = await this.getSnmpInfo(printer.ip_address, printer);
                 isOnline = true;
                 model = snmpData.model || model;
                 statusText = snmpData.statusText || statusText;
@@ -178,11 +179,12 @@ class PrinterMonitorService {
                 fullPrinter.toners = fullPrinter.toners ? JSON.parse(fullPrinter.toners) : [];
                 this.io.emit('printer:updated', fullPrinter);
 
-                // Toner düşük seviye kontrolü (<%10)
+                // Toner düşük seviye kontrolü (merkezi eşik: LOW_TONER_THRESHOLD_PERCENT)
                 if (isOnline && toners.length > 0) {
+                    const lowTonerThreshold = getLowTonerThreshold();
                     const lowToners = toners.filter(t => {
                         const maxCap = t.maxCapacity || 100;
-                        return maxCap > 0 && (t.level / maxCap) * 100 < 10;
+                        return maxCap > 0 && (t.level / maxCap) * 100 < lowTonerThreshold;
                     });
 
                     if (lowToners.length > 0) {
@@ -219,14 +221,54 @@ class PrinterMonitorService {
         }
     }
 
+    /**
+     * Creates an SNMP session using either:
+     * - Configured SNMP_COMMUNITY or per-printer community
+     * - SNMPv3 abstraction with auth and privacy protocols
+     * Fails-closed in production if SNMP_COMMUNITY is missing (no fallback to "public").
+     */
+    createSnmpSession(ipAddress, printerConfig = {}) {
+        const isProd = process.env.NODE_ENV === 'production';
+        const version = printerConfig.snmp_version || process.env.SNMP_VERSION || '1';
+        const timeout = parseInt(process.env.SNMP_TIMEOUT_MS || '3000', 10);
+        const retries = parseInt(process.env.SNMP_RETRIES || '1', 10);
+
+        // SNMPv3 support abstraction
+        if (version === '3' || version === 3) {
+            const user = {
+                name: printerConfig.snmp_username || process.env.SNMP_V3_USER || '',
+                level: printerConfig.snmp_security_level || snmp.SecurityLevel.authPriv,
+                authProtocol: printerConfig.snmp_auth_proto || snmp.AuthProtocols.sha,
+                authKey: printerConfig.snmp_auth_key || process.env.SNMP_V3_AUTH_KEY || '',
+                privProtocol: printerConfig.snmp_priv_proto || snmp.PrivProtocols.aes,
+                privKey: printerConfig.snmp_priv_key || process.env.SNMP_V3_PRIV_KEY || ''
+            };
+            return snmp.createV3Session(ipAddress, user, { timeout, retries });
+        }
+
+        // SNMPv1 / SNMPv2c
+        const community = printerConfig.snmp_community || process.env.SNMP_COMMUNITY || (isProd ? null : 'public');
+        if (!community) {
+            throw new Error(`SNMP_COMMUNITY environment variable is mandatory in production. Target: ${ipAddress}`);
+        }
+
+        const snmpVersion = (version === '2c' || version === '2' || version === 2) ? snmp.Version2c : snmp.Version1;
+        return snmp.createSession(ipAddress, community, {
+            timeout,
+            retries,
+            version: snmpVersion
+        });
+    }
+
     // --- SNMP LOGIC ---
-    getSnmpInfo(ipAddress) {
+    getSnmpInfo(ipAddress, printerConfig = {}) {
         return new Promise((resolve, reject) => {
-            const session = snmp.createSession(ipAddress, "public", {
-                timeout: 3000,
-                retries: 1,
-                version: snmp.Version1
-            });
+            let session;
+            try {
+                session = this.createSnmpSession(ipAddress, printerConfig);
+            } catch (sessionErr) {
+                return reject(sessionErr);
+            }
 
             const data = {
                 model: '',

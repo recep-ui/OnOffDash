@@ -296,6 +296,16 @@ router.post('/toners/replacements/import', requireRole('operator'), async (req, 
     }
 });
 
+function sanitizePrinter(printer) {
+    if (!printer) return printer;
+    const clean = { ...printer };
+    delete clean.snmp_community;
+    delete clean.snmp_auth_key;
+    delete clean.snmp_priv_key;
+    delete clean.snmp_password;
+    return clean;
+}
+
 // GET /api/printers — Tüm yazıcıları listele
 router.get('/', async (req, res) => {
     try {
@@ -310,10 +320,10 @@ router.get('/', async (req, res) => {
             FROM printers p
             ORDER BY p.name
         `);
-        // Parse toners JSON string back to object array
+        // Parse toners JSON string back to object array & sanitize credentials
         const rows = result.rows.map(row => {
             row.toners = row.toners ? JSON.parse(row.toners) : [];
-            return row;
+            return sanitizePrinter(row);
         });
         res.json(rows);
     } catch (err) {
@@ -366,7 +376,7 @@ router.get('/:id', async (req, res) => {
         
         const row = result.rows[0];
         row.toners = row.toners ? JSON.parse(row.toners) : [];
-        res.json(row);
+        res.json(sanitizePrinter(row));
     } catch (err) {
         console.error('Error fetching printer:', err);
         res.status(500).json({ error: 'Failed to fetch printer' });
