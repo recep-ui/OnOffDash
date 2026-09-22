@@ -4,6 +4,52 @@ All notable changes and architectural/security improvements across OnOffDash V2 
 
 ---
 
+## [2.3.0] - September 2026 — Post-Remediation Security Hardening Pass
+
+### P0 — Python Microservice Dependencies Vulnerability Remediation
+- Upgraded `pdf-service` and `file-service` dependencies to patched upstream releases:
+  - `fastapi==0.141.1`, `starlette==1.6.0`, `python-multipart==0.0.32`
+  - `pypdf==6.19.0`, `pillow==12.3.0`, `pyjwt==2.14.0`, `cryptography==50.0.1`
+- Fully resolved all CVEs; pipeline achieves 0 vulnerabilities under `pip-audit` without bypasses or ignores.
+
+### P1 — Elimination of Legacy Agent Auth Bypass & Authoritative Binding
+- Disabled legacy shared `AGENT_API_KEY` authentication by default, requiring explicit `ALLOW_LEGACY_AGENT_AUTH=true`.
+- Bound telemetry strictly to `req.authenticatedDeviceId`, preventing rogue device creation or IP impersonation.
+- Created filtered unique index `uq_active_agent_credential_per_device` in MSSQL ensuring at most one active key per device.
+- Wrapped agent enrollment and rotation in SQL transactions.
+
+### P1 — Authoritative Multi-Instance Distributed Token Revocation
+- Enforced `token_version` claim requirement across all access tokens (rejection on missing or mismatching claim).
+- Integrated bounded 5-second session cache querying MSSQL `users.token_version` to guarantee distributed cross-instance revocation within 5s while preventing database hammering.
+- Invalidates sessions immediately upon password change, admin role modification, or user deletion.
+
+### P1 — Asymmetric RS256 JWT Migration & Token Introspection
+- Implemented RS256 asymmetric signing in backend with public-key verification across microservices.
+- Added RFC 7662 token introspection endpoint (`POST /api/auth/introspect`) and public key endpoint (`GET /api/auth/public-key`).
+- Restricted allowed verification algorithms to prevent algorithm confusion attacks.
+
+### P1 — Atomic Replay-Resistant Refresh Token Rotation
+- Refresh token rotation executed within an MSSQL transaction with atomic conditional update (`WHERE id = @id AND revoked_at IS NULL`).
+- Added unique index `UQ_user_refresh_tokens_token_hash` on `user_refresh_tokens(token_hash)`.
+- Replay detection immediately revokes the entire token family via `family_id`.
+- Removed `req.body.refreshToken` fallback, enforcing strictly `HttpOnly`, `SameSite=Strict`, `Secure` cookies.
+
+### P2 — Document-Layer Content Security Policy at Nginx
+- Configured document-layer CSP header in `frontend/nginx.conf` and `frontend/nginx.prod-ssl.conf` aligned with backend Helmet policy.
+
+### P2 — Resource Exhaustion & Path Traversal Defenses (PDF & Image Services)
+- Bounded PDF previews to maximum 50 pages (`MAX_PREVIEW_PAGES`) and safe rendering dimensions (4000px, 16 megapixels).
+- Enforced Pillow decompression bomb limits (`MAX_IMAGE_PIXELS = 25,000,000`), image dimension bounds (5000px), and parameter clamping.
+- Hardened file downloads against directory traversal (`os.path.realpath` under `OUTPUT_DIR`) and enforced file ownership.
+
+### P2 — Supply Chain & Container Security Hardening
+- Pinned all GitHub Actions in `.github/workflows/ci.yml` to full, immutable commit SHAs with version comments.
+- Configured least-privilege job permissions (`contents: read`) and timeouts across all CI jobs.
+- Added `.github/dependabot.yml` for automated dependency updates across npm, pip, and actions.
+- Hardened Docker Compose runtime with `no-new-privileges: true` and `cap_drop: ALL`.
+
+---
+
 ## [2.2.0] - September 2026
 
 ### P0 — Broken XLSX Dependency Removal & ExcelJS Migration
