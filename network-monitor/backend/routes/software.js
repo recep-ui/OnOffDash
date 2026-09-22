@@ -1,8 +1,20 @@
 const express = require('express');
 const router = express.Router();
+const rateLimit = require('express-rate-limit');
 const { pool } = require('../db/connection');
 const { authenticateToken } = require('../middleware/auth');
 const { authenticateAgent } = require('../middleware/agentAuth');
+
+const softwareLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 500,
+    standardHeaders: true,
+    legacyHeaders: false,
+    skip: () => process.env.NODE_ENV === 'test',
+    message: { error: 'Çok fazla istek yapıldı, lütfen daha sonra tekrar deneyiniz.' }
+});
+
+router.use(softwareLimiter);
 
 const { isValidIP } = require('../utils/validators');
 

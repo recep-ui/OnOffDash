@@ -3,7 +3,19 @@ const router = express.Router();
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
+const rateLimit = require('express-rate-limit');
 const { authenticateAgent } = require('../middleware/agentAuth');
+
+const agentLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 500,
+    standardHeaders: true,
+    legacyHeaders: false,
+    skip: () => process.env.NODE_ENV === 'test',
+    message: { error: 'Çok fazla istek yapıldı, lütfen daha sonra tekrar deneyiniz.' }
+});
+
+router.use(agentLimiter);
 
 const VERSION_FILE = path.join(__dirname, '..', 'agent_version.json');
 const AGENT_DIR = path.join(__dirname, '..', 'agent_binaries');

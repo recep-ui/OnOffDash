@@ -46,6 +46,7 @@ async function authenticateAgent(req, res, next) {
                 return res.status(401).json({ error: 'Bu ajan erişim anahtarı iptal edilmiştir (revoked).' });
             }
 
+            // codeql[js/insufficient-password-hash] High-entropy random 256-bit API token hash, not a human password
             const computedHash = crypto.createHash('sha256').update(secret).digest('hex');
             const computedBuffer = Buffer.from(computedHash);
             const storedBuffer = Buffer.from(cred.key_hash);
