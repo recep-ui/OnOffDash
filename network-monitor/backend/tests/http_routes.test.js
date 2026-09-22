@@ -204,6 +204,22 @@ describe('Real Production Route Integration Test Suite', () => {
                 }
             }
 
+            if (upper.includes('UPDATE DEVICES SET')) {
+                const id = parseInt(params[4], 10);
+                const existing = testDevices.find(d => d.id === id);
+                if (existing) {
+                    existing.hostname = params[0];
+                    if (params[1]) existing.mac_address = params[1];
+                    if (params[2]) existing.os_name = params[2];
+                    if (params[3]) existing.username = params[3];
+                    existing.agent_installed = 1;
+                    existing.agent_status = 'online';
+                    existing.last_heartbeat_at = new Date();
+                    return { rows: [existing], rowCount: 1 };
+                }
+                return { rows: [], rowCount: 0 };
+            }
+
             // 4. Agent credentials
             if (upper.includes('FROM AGENT_CREDENTIALS WHERE KEY_ID =')) {
                 const keyId = params[0];
@@ -479,11 +495,11 @@ describe('Real Production Route Integration Test Suite', () => {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'X-Agent-Key': process.env.AGENT_API_KEY
+                    'X-Agent-Key': 'agk_devA.secret-device-a-12345'
                 },
                 body: JSON.stringify({
                     hostname: 'host-1',
-                    ip_address: '10.0.80.10',
+                    ip_address: '10.0.80.50',
                     os_name: oversizedOs
                 })
             });
@@ -614,7 +630,7 @@ describe('Real Production Route Integration Test Suite', () => {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'X-Agent-Key': process.env.AGENT_API_KEY
+                    'X-Agent-Key': 'agk_devA.secret-device-a-12345'
                 },
                 body: JSON.stringify({
                     device_ip: '10.0.80.50',

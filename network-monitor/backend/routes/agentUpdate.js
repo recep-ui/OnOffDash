@@ -188,40 +188,57 @@ router.post('/enroll', authenticateToken, requireRole('operator'), async (req, r
             targetDeviceId = targetDevice.id;
         }
 
-        // 4. Duplicate active credentials & rotation support
-        const existingActive = await pool.query(
-            'SELECT id, key_id FROM agent_credentials WHERE device_id = $1 AND is_revoked = 0',
-            [targetDeviceId]
-        );
+        // 4. Transactional duplicate active credentials & rotation support
+        const client = await pool.connect();
+        let keyId;
+        let secret;
+        let rotated = false;
+        try {
+            await client.query('BEGIN');
 
-        if (existingActive.rows.length > 0) {
-            if (rotate) {
-                await pool.query(
-                    'UPDATE agent_credentials SET is_revoked = 1, revoked_at = GETDATE() WHERE device_id = $1 AND is_revoked = 0',
-                    [targetDeviceId]
-                );
-            } else {
-                return res.status(409).json({
-                    error: 'Bu cihaza ait aktif bir ajan anahtarı zaten mevcut. Yenilemek için rotate: true gönderin.',
-                    active_keys: existingActive.rows.map(r => r.key_id)
-                });
+            const existingActive = await client.query(
+                'SELECT id, key_id FROM agent_credentials WHERE device_id = $1 AND is_revoked = 0',
+                [targetDeviceId]
+            );
+
+            if (existingActive.rows.length > 0) {
+                if (rotate) {
+                    await client.query(
+                        'UPDATE agent_credentials SET is_revoked = 1, revoked_at = GETDATE() WHERE device_id = $1 AND is_revoked = 0',
+                        [targetDeviceId]
+                    );
+                    rotated = true;
+                } else {
+                    await client.query('ROLLBACK');
+                    return res.status(409).json({
+                        error: 'Bu cihaza ait aktif bir ajan anahtarı zaten mevcut. Yenilemek için rotate: true gönderin.',
+                        active_keys: existingActive.rows.map(r => r.key_id)
+                    });
+                }
             }
+
+            // Benzersiz key_id ve secret üret
+            keyId = `agk_${crypto.randomBytes(8).toString('hex')}`;
+            secret = crypto.randomBytes(32).toString('hex');
+            const keyHash = crypto.createHash('sha256').update(secret).digest('hex');
+
+            // Veritabanına kaydet: Secret asla saklanmaz, yalnızca SHA-256 hash'i saklanır
+            await client.query(
+                `INSERT INTO agent_credentials (device_id, key_id, key_hash, is_revoked, created_at)
+                 VALUES ($1, $2, $3, 0, GETDATE())`,
+                [targetDeviceId, keyId, keyHash]
+            );
+
+            // Cihazın agent_installed durumunu güncelle
+            await client.query('UPDATE devices SET agent_installed = 1, updated_at = GETDATE() WHERE id = $1', [targetDeviceId]);
+
+            await client.query('COMMIT');
+        } catch (txErr) {
+            await client.query('ROLLBACK').catch(() => {});
+            throw txErr;
+        } finally {
+            client.release();
         }
-
-        // Benzersiz key_id ve secret üret
-        const keyId = `agk_${crypto.randomBytes(8).toString('hex')}`;
-        const secret = crypto.randomBytes(32).toString('hex');
-        const keyHash = crypto.createHash('sha256').update(secret).digest('hex');
-
-        // Veritabanına kaydet: Secret asla saklanmaz, yalnızca SHA-256 hash'i saklanır
-        await pool.query(
-            `INSERT INTO agent_credentials (device_id, key_id, key_hash, is_revoked, created_at)
-             VALUES ($1, $2, $3, 0, GETDATE())`,
-            [targetDeviceId, keyId, keyHash]
-        );
-
-        // Cihazın agent_installed durumunu güncelle
-        await pool.query('UPDATE devices SET agent_installed = 1, updated_at = GETDATE() WHERE id = $1', [targetDeviceId]);
 
         // Denetim günlüğü (Audit Log)
         try {
@@ -234,7 +251,7 @@ router.post('/enroll', authenticateToken, requireRole('operator'), async (req, r
                     'AGENT_ENROLLED',
                     'device',
                     String(targetDeviceId),
-                    JSON.stringify({ key_id: keyId, rotated: existingActive.rows.length > 0 }),
+                    JSON.stringify({ key_id: keyId, rotated }),
                     req.ip || null
                 ]
             );

@@ -32,7 +32,7 @@ async function authenticateAgent(req, res, next) {
 
         try {
             const credResult = await pool.query(
-                'SELECT id, device_id, key_hash, is_revoked FROM agent_credentials WHERE key_id = $1',
+                'SELECT id, device_id, key_id, key_hash, is_revoked FROM agent_credentials WHERE key_id = $1',
                 [keyId]
             );
 
@@ -67,7 +67,13 @@ async function authenticateAgent(req, res, next) {
         }
     }
 
-    // 2. Fallback: Legacy shared AGENT_API_KEY
+    // 2. Fallback: Legacy shared AGENT_API_KEY (Disabled by default)
+    if (process.env.ALLOW_LEGACY_AGENT_AUTH !== 'true') {
+        return res.status(401).json({ 
+            error: 'Paylaşımlı eski ajan erişim anahtarı devre dışı bırakılmıştır. Cihaza özel anahtar kullanınız.' 
+        });
+    }
+
     const serverKey = process.env.AGENT_API_KEY;
 
     if (!serverKey || serverKey.trim().length === 0) {

@@ -48,17 +48,21 @@ router.post('/', authenticateAgent, async (req, res) => {
             }
         }
 
-        // Cihazı bul
-        const deviceResult = await pool.query(
-            'SELECT id FROM devices WHERE ip_address = $1',
-            [device_ip.trim()]
-        );
+        // Cihazı bul veya doğrulanmış ID'yi kullan
+        let deviceId;
+        if (req.authenticatedDeviceId) {
+            deviceId = req.authenticatedDeviceId;
+        } else {
+            const deviceResult = await pool.query(
+                'SELECT id FROM devices WHERE ip_address = $1',
+                [device_ip.trim()]
+            );
 
-        if (deviceResult.rows.length === 0) {
-            return res.status(404).json({ error: 'Device not found' });
+            if (deviceResult.rows.length === 0) {
+                return res.status(404).json({ error: 'Device not found' });
+            }
+            deviceId = deviceResult.rows[0].id;
         }
-
-        const deviceId = deviceResult.rows[0].id;
 
         // Atomik işlem: Tek transaction içinde eski kayıtları sil ve chunk'lar halinde ekle
         const client = await pool.connect();
