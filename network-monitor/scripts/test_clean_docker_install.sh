@@ -54,6 +54,15 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 echo "=== [2/6] Generating Clean Test Configuration (.env) ==="
+mkdir -p "${PROJECT_DIR}/keys"
+if [ ! -f "${PROJECT_DIR}/keys/jwt_private.pem" ] || [ ! -f "${PROJECT_DIR}/keys/jwt_public.pem" ]; then
+  echo "[*] Generating test 2048-bit RSA keypair in ${PROJECT_DIR}/keys..."
+  openssl genrsa -out "${PROJECT_DIR}/keys/jwt_private.pem" 2048
+  openssl rsa -in "${PROJECT_DIR}/keys/jwt_private.pem" -pubout -out "${PROJECT_DIR}/keys/jwt_public.pem"
+  chmod 600 "${PROJECT_DIR}/keys/jwt_private.pem"
+  chmod 644 "${PROJECT_DIR}/keys/jwt_public.pem"
+fi
+
 cat << 'EOF' > "${TEST_ENV_FILE}"
 HOST_PORT=8088
 ACCEPT_EULA=Y
@@ -70,6 +79,10 @@ BOOTSTRAP_ADMIN_PASSWORD=AdminCleanDeployPass2026!
 PING_INTERVAL_SECONDS=60
 HEARTBEAT_TIMEOUT_SECONDS=90
 RETENTION_DAYS=30
+JWT_PRIVATE_KEY_PATH=/etc/ssl/certs/jwt_private.pem
+JWT_PUBLIC_KEY_PATH=/etc/ssl/certs/jwt_public.pem
+AUTH_INTROSPECTION_SECRET=clean-deploy-introspection-secret-min-32-chars
+ALLOW_LEGACY_AGENT_AUTH=false
 JWT_SECRET=clean-deployment-verification-jwt-secret-min-32-chars-long
 AGENT_API_KEY=clean-deployment-verification-agent-api-key-32-chars
 CORS_ORIGINS=http://localhost:8088,http://localhost

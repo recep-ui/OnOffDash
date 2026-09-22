@@ -58,6 +58,9 @@ services:
         condition: service_healthy
       db-init:
         condition: service_completed_successfully
+    volumes:
+      - ./keys/jwt_private.pem:/etc/ssl/certs/jwt_private.pem:ro
+      - ./keys/jwt_public.pem:/etc/ssl/certs/jwt_public.pem:ro
     environment:
       - NODE_ENV=production
       - DB_HOST=db
@@ -74,7 +77,10 @@ services:
       - PING_INTERVAL_SECONDS=${PING_INTERVAL_SECONDS:-60}
       - HEARTBEAT_TIMEOUT_SECONDS=${HEARTBEAT_TIMEOUT_SECONDS:-90}
       - RETENTION_DAYS=${RETENTION_DAYS:-30}
-      - JWT_SECRET=${JWT_SECRET}
+      - JWT_PRIVATE_KEY_PATH=${JWT_PRIVATE_KEY_PATH:-/etc/ssl/certs/jwt_private.pem}
+      - JWT_PUBLIC_KEY_PATH=${JWT_PUBLIC_KEY_PATH:-/etc/ssl/certs/jwt_public.pem}
+      - AUTH_INTROSPECTION_SECRET=${AUTH_INTROSPECTION_SECRET}
+      - ALLOW_LEGACY_AGENT_AUTH=${ALLOW_LEGACY_AGENT_AUTH:-false}
       - AGENT_API_KEY=${AGENT_API_KEY}
       - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost,http://localhost:80}
     healthcheck:
@@ -95,6 +101,10 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    volumes:
+      - ./keys/jwt_public.pem:/etc/ssl/certs/jwt_public.pem:ro
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=100m
     environment:
       - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost,http://localhost:80}
       - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB:-50}
@@ -103,7 +113,9 @@ services:
       - DB_NAME=${DB_NAME}
       - DB_USER=${DB_APP_USER:-onoffdash_app}
       - DB_PASSWORD=${DB_APP_PASSWORD}
-      - JWT_SECRET=${JWT_SECRET}
+      - JWT_PUBLIC_KEY_PATH=${JWT_PUBLIC_KEY_PATH:-/etc/ssl/certs/jwt_public.pem}
+      - AUTH_INTROSPECTION_URL=${AUTH_INTROSPECTION_URL:-http://backend:3001/api/auth/introspect}
+      - AUTH_INTROSPECTION_SECRET=${AUTH_INTROSPECTION_SECRET}
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/api/pdf/health')"]
       interval: 15s
@@ -122,6 +134,10 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    volumes:
+      - ./keys/jwt_public.pem:/etc/ssl/certs/jwt_public.pem:ro
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=100m
     environment:
       - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost,http://localhost:80}
       - FILE_TOOLS_MAX_FILE_SIZE_MB=${FILE_TOOLS_MAX_FILE_SIZE_MB:-50}
@@ -132,7 +148,9 @@ services:
       - DB_NAME=${DB_NAME}
       - DB_USER=${DB_APP_USER:-onoffdash_app}
       - DB_PASSWORD=${DB_APP_PASSWORD}
-      - JWT_SECRET=${JWT_SECRET}
+      - JWT_PUBLIC_KEY_PATH=${JWT_PUBLIC_KEY_PATH:-/etc/ssl/certs/jwt_public.pem}
+      - AUTH_INTROSPECTION_URL=${AUTH_INTROSPECTION_URL:-http://backend:3001/api/auth/introspect}
+      - AUTH_INTROSPECTION_SECRET=${AUTH_INTROSPECTION_SECRET}
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8002/api/file-tools/health')"]
       interval: 15s
