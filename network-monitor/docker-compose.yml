@@ -3,6 +3,8 @@ services:
     image: mcr.microsoft.com/mssql/server:2022-latest
     container_name: network_monitor_db
     restart: always
+    security_opt:
+      - no-new-privileges:true
     environment:
       ACCEPT_EULA: "Y"
       MSSQL_SA_PASSWORD: "${MSSQL_SA_PASSWORD}"
@@ -20,6 +22,10 @@ services:
       context: ./backend
     container_name: network_monitor_db_init
     restart: "no"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     command: ["node", "db/init.js"]
     depends_on:
       db:
@@ -41,6 +47,10 @@ services:
       context: ./backend
     container_name: network_monitor_backend
     restart: always
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     cap_add:
       - NET_RAW
     depends_on:
@@ -78,6 +88,10 @@ services:
       context: ./services/pdf-service
     container_name: network_monitor_pdf
     restart: always
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     depends_on:
       db:
         condition: service_healthy
@@ -101,6 +115,10 @@ services:
       context: ./services/file-service
     container_name: network_monitor_file
     restart: always
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     depends_on:
       db:
         condition: service_healthy
@@ -126,6 +144,14 @@ services:
       context: ./frontend
     container_name: network_monitor_frontend
     restart: always
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
     depends_on:
       backend:
         condition: service_healthy
