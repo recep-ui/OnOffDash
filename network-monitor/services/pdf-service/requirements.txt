@@ -8,3 +8,7 @@ pillow==12.3.0
 pymssql==2.3.2
 pyjwt==2.14.0
 cryptography==50.0.1
+setuptools>=84.0.0
+wheel>=0.48.0
+msgpack>=1.2.2
+jaraco.context>=6.1.2

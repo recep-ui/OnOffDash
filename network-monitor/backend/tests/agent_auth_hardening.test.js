@@ -19,7 +19,7 @@ describe('Agent Authentication Hardening Suite', () => {
     it('1. should reject legacy shared AGENT_API_KEY when ALLOW_LEGACY_AGENT_AUTH is disabled (default)', async () => {
         const req = {
             headers: {
-                'x-agent-key': process.env.AGENT_API_KEY
+                'x-agent-key': 'test-server-agent-key-min-32-chars-long-12345'
             }
         };
         let status = null;
@@ -46,7 +46,7 @@ describe('Agent Authentication Hardening Suite', () => {
 
         const req = {
             headers: {
-                'x-agent-key': process.env.AGENT_API_KEY
+                'x-agent-key': 'test-server-agent-key-min-32-chars-long-12345'
             }
         };
         const headers = {};

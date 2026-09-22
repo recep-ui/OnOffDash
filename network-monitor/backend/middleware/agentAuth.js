@@ -13,9 +13,9 @@ async function verifyPerDeviceToken(tokenString, req, res, next) {
 
     const lastIdx = tokenString.lastIndexOf(delimiter);
     const keyId = tokenString.substring(0, lastIdx);
-    const tokenProof = tokenString.substring(lastIdx + 1);
+    const tokenEntropy = tokenString.substring(lastIdx + 1);
 
-    if (!tokenProof || tokenProof.trim().length === 0) {
+    if (!tokenEntropy || !/^[0-9a-zA-Z\-_]{16,128}$/.test(tokenEntropy)) {
         return res.status(401).json({ error: 'Geçersiz veya biçimi bozuk ajan erişim anahtarı.' });
     }
 
@@ -35,8 +35,9 @@ async function verifyPerDeviceToken(tokenString, req, res, next) {
             return res.status(401).json({ error: 'Bu ajan erişim anahtarı iptal edilmiştir (revoked).' });
         }
 
-        // Compute SHA-256 digest of the random 256-bit token proof
-        const computedDigest = crypto.createHash('sha256').update(tokenProof).digest('hex');
+        // Compute SHA-256 digest of the random 256-bit token entropy
+        const entropyBuffer = Buffer.from(tokenEntropy, 'utf-8');
+        const computedDigest = crypto.createHash('sha256').update(entropyBuffer).digest('hex');
         const computedBuffer = Buffer.from(computedDigest);
         const storedBuffer = Buffer.from(cred.key_hash);
 

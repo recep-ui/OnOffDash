@@ -5,8 +5,9 @@ WORKDIR /app
 RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir --upgrade pip "wheel>=0.46.2" "jaraco.context>=6.1.0" \
-    && pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --upgrade pip "setuptools>=84.0.0" "wheel>=0.48.0" "msgpack>=1.2.2" "jaraco.context>=6.1.2" \
+    && pip install --no-cache-dir -r requirements.txt \
+    && pip install --no-cache-dir --upgrade "setuptools>=84.0.0" "wheel>=0.48.0" "msgpack>=1.2.2" "jaraco.context>=6.1.2"
 
 # Create storage directories and non-root app user
 RUN mkdir -p /storage/file-tools/temp /storage/file-tools/output /storage/logs \

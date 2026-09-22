@@ -150,7 +150,7 @@ describe('Authentication & Authorization Middleware', () => {
         it('should accept agent request with matching X-Agent-Key when legacy auth is allowed', () => {
             process.env.ALLOW_LEGACY_AGENT_AUTH = 'true';
             let nextCalled = false;
-            const req = { headers: { 'x-agent-key': process.env.AGENT_API_KEY } };
+            const req = { headers: { 'x-agent-key': 'this-is-a-test-agent-key-at-least-32-chars-long' } };
             const res = { setHeader: () => {}, status: () => res, json: () => res };
 
             authenticateAgent(req, res, () => { nextCalled = true; });
