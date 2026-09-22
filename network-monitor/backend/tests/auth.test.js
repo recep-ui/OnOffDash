@@ -81,7 +81,7 @@ describe('Authentication & Authorization Middleware', () => {
         });
 
         it('should authenticate valid Bearer token and attach user', () => {
-            const validToken = jwt.sign({ id: 1, username: 'testuser', role: 'operator' }, process.env.JWT_SECRET);
+            const validToken = jwt.sign({ id: 1, username: 'testuser', role: 'operator', token_version: 1 }, process.env.JWT_SECRET);
             const req = { headers: { authorization: `Bearer ${validToken}` } };
             const res = { status: () => res, json: () => res };
             let nextCalled = false;
@@ -92,8 +92,21 @@ describe('Authentication & Authorization Middleware', () => {
             assert.strictEqual(req.user.role, 'operator');
         });
 
+        it('should reject access token missing token_version claim', () => {
+            const tokenNoTv = jwt.sign({ id: 1, username: 'testuser', role: 'operator' }, process.env.JWT_SECRET);
+            const req = { headers: { authorization: `Bearer ${tokenNoTv}` } };
+            let statusCode = null;
+            const res = {
+                status: (code) => { statusCode = code; return res; },
+                json: () => res
+            };
+
+            authenticateToken(req, res, () => {});
+            assert.strictEqual(statusCode, 401);
+        });
+
         it('should reject token from query string to prevent leakage in URLs', () => {
-            const validToken = jwt.sign({ id: 1, username: 'testuser', role: 'admin' }, process.env.JWT_SECRET);
+            const validToken = jwt.sign({ id: 1, username: 'testuser', role: 'admin', token_version: 1 }, process.env.JWT_SECRET);
             const req = {
                 headers: {},
                 query: { token: validToken }
