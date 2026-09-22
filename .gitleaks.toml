@@ -1,0 +1,23 @@
+title = "OnOffDash Gitleaks Configuration"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Allowlist test suites, mock secrets, and environment templates"
+paths = [
+  '''(?i)\.env\.example$''',
+  '''(?i)network-monitor/agent/\.env\.example$''',
+  '''(?i)network-monitor/backend/tests/.*''',
+  '''(?i)network-monitor/agent/tests?/.*''',
+  '''(?i)network-monitor/services/.*/tests/.*'''
+]
+stopwords = [
+  "this-is-a-test-jwt-secret-key-at-least-32-chars-long",
+  "ci-test-introspection-secret-key-min-32-chars",
+  "clean-deployment-verification-jwt-secret-min-32-chars-long",
+  "agk_0123456789abcdef.fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+]
+regexes = [
+  '''agk_[0-9a-f]{16}\.[0-9a-f]{64}'''
+]

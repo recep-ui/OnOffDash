@@ -316,7 +316,7 @@ jobs:
         run: docker compose config --quiet
 
       - name: Run Clean Docker Deployment Smoke Test
-        run: ./network-monitor/scripts/test_clean_docker_install.sh
+        run: bash ./network-monitor/scripts/test_clean_docker_install.sh
 
       - name: Enforce Prerequisite Quality Jobs Passed
         run: |

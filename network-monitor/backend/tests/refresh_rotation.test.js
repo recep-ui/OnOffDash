@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 
-process.env.JWT_SECRET = 'this-is-a-test-jwt-secret-key-at-least-32-chars-long';
+process.env.JWT_SECRET = 'this-is-a-test-jwt-secret-key-at-least-32-chars-long'; // gitleaks:allow
 process.env.NODE_ENV = 'test';
 
 const { signAccessToken, verifyAccessToken, getPublicKey, isAsymmetric } = require('../middleware/auth');
