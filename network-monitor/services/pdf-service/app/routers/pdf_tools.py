@@ -468,25 +468,24 @@ async def download_file(file_id: str, background_tasks: BackgroundTasks, user: d
     """
     Serves the output PDF file and checks ownership against requesting user.
     """
+    import re
     from pathlib import Path
 
-    if ".." in file_id or "/" in file_id or "\\" in file_id or "\0" in file_id:
+    if not re.match(r"^(u\d+_)?[0-9a-fA-F\-]{8,64}\.[a-zA-Z0-9]{1,10}$", file_id):
         raise HTTPException(status_code=400, detail="Invalid file path.")
 
     try:
         base_dir = Path(OUTPUT_DIR).resolve()
-        candidate = (base_dir / Path(file_id).name).resolve()
-        candidate.relative_to(base_dir)
-        if os.path.commonpath([str(base_dir), str(candidate)]) != str(base_dir):
-            raise HTTPException(status_code=400, detail="Invalid file path.")
-    except (ValueError, RuntimeError):
-        raise HTTPException(status_code=400, detail="Invalid file path.")
+        available_files = {f.name: f for f in base_dir.iterdir() if f.is_file()}
+    except Exception:
+        available_files = {}
 
-    file_path = str(candidate)
-    safe_name = candidate.name
-
-    if not os.path.exists(file_path) or not os.path.isfile(file_path):
+    if file_id not in available_files:
         raise HTTPException(status_code=404, detail="File not found or expired.")
+
+    target_file = available_files[file_id]
+    file_path = str(target_file.resolve())
+    safe_name = target_file.name
         
     user_id = user.get("id")
     role = user.get("role", "")

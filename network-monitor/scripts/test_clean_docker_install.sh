@@ -102,7 +102,7 @@ echo "=== [4/6] Polling Database and db-init Service Completion ==="
 
 echo "[*] Waiting for MSSQL container (network_monitor_db) to report healthy..."
 MSSQL_READY=0
-for i in $(seq 1 30); do
+for i in $(seq 1 60); do
   STATUS=$(${DOCKER_CMD} inspect --format='{{json .State.Health.Status}}' network_monitor_db 2>/dev/null || echo '"unknown"')
   if [[ "$STATUS" == '"healthy"' ]]; then
     echo "[+] MSSQL is healthy! (${i}s)"
