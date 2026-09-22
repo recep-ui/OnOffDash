@@ -146,33 +146,33 @@ jobs:
         uses: actions/setup-python@0a5c61591373683505ea898e09a3ea4f39ef2b9c # v5.0.0
         with:
           python-version: "3.11"
+          cache: 'pip'
 
-      - name: Install Python Dependencies & Audit Tools
-        run: |
-          python -m pip install --upgrade pip
-          pip install pyjwt cryptography pip-audit
-
-      - name: Enforced Audit of PDF Service Dependencies
-        working-directory: network-monitor/services/pdf-service
-        run: |
-          pip-audit -r requirements.txt --desc
-
-      - name: Enforced Audit of File Service Dependencies
-        working-directory: network-monitor/services/file-service
-        run: |
-          pip-audit -r requirements.txt --desc
-
-      - name: Test PDF Service
+      - name: PDF Service Test & Audit (Isolated Environment)
         working-directory: network-monitor/services/pdf-service
         env:
           JWT_SECRET: "ci-pipeline-test-jwt-secret-key-at-least-32-chars-long"
-        run: python -m unittest discover -s tests -p "test_*.py"
+        run: |
+          python -m venv .venv-pdf
+          . .venv-pdf/bin/activate
+          pip install --upgrade pip
+          pip install -r requirements.txt pip-audit
+          pip-audit -r requirements.txt --desc
+          python -m unittest discover -s tests -p "test_*.py"
+          deactivate
 
-      - name: Test File Service
+      - name: File Service Test & Audit (Isolated Environment)
         working-directory: network-monitor/services/file-service
         env:
           JWT_SECRET: "ci-pipeline-test-jwt-secret-key-at-least-32-chars-long"
-        run: python -m unittest discover -s tests -p "test_*.py"
+        run: |
+          python -m venv .venv-file
+          . .venv-file/bin/activate
+          pip install --upgrade pip
+          pip install -r requirements.txt pip-audit
+          pip-audit -r requirements.txt --desc
+          python -m unittest discover -s tests -p "test_*.py"
+          deactivate
 
   security-secret-scan:
     name: Secret Scanning (Gitleaks)
@@ -188,7 +188,7 @@ jobs:
           persist-credentials: false
 
       - name: Run Gitleaks
-        uses: gitleaks/gitleaks-action@e89540b6e927c8d9e7ecfb5233633ab0ff64b97d # v2.3.8
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -206,12 +206,12 @@ jobs:
           persist-credentials: false
 
       - name: Initialize CodeQL Analysis
-        uses: github/codeql-action/init@4f3212b61708ac005b63cfadcfd1ce9db5cfc024 # v3.27.0
+        uses: github/codeql-action/init@6bb031afdd8eb862ea3fc1848194185e076637e5 # v3.28.11
         with:
           languages: javascript-typescript, python
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@4f3212b61708ac005b63cfadcfd1ce9db5cfc024 # v3.27.0
+        uses: github/codeql-action/analyze@6bb031afdd8eb862ea3fc1848194185e076637e5 # v3.28.11
         with:
           category: "/language:javascript-typescript,python"
 
@@ -232,7 +232,7 @@ jobs:
         run: docker build -t onoffdash-backend:test ./network-monitor/backend
 
       - name: Scan Backend Image
-        uses: aquasecurity/trivy-action@18f2510ee396bbf400402947b394f2dd8c87dbb0 # v0.29.0
+        uses: aquasecurity/trivy-action@d2a0b60797ff03db6132bd4e2b293f9b37081297 # v0.36.0 (resolves setup-trivy v0.3.1)
         with:
           image-ref: 'onoffdash-backend:test'
           format: 'table'
@@ -245,7 +245,7 @@ jobs:
         run: docker build -t onoffdash-frontend:test ./network-monitor/frontend
 
       - name: Scan Frontend Image
-        uses: aquasecurity/trivy-action@18f2510ee396bbf400402947b394f2dd8c87dbb0 # v0.29.0
+        uses: aquasecurity/trivy-action@d2a0b60797ff03db6132bd4e2b293f9b37081297 # v0.36.0 (resolves setup-trivy v0.3.1)
         with:
           image-ref: 'onoffdash-frontend:test'
           format: 'table'
@@ -258,7 +258,7 @@ jobs:
         run: docker build -t onoffdash-pdf:test ./network-monitor/services/pdf-service
 
       - name: Scan PDF Service Image
-        uses: aquasecurity/trivy-action@18f2510ee396bbf400402947b394f2dd8c87dbb0 # v0.29.0
+        uses: aquasecurity/trivy-action@d2a0b60797ff03db6132bd4e2b293f9b37081297 # v0.36.0 (resolves setup-trivy v0.3.1)
         with:
           image-ref: 'onoffdash-pdf:test'
           format: 'table'
@@ -271,7 +271,7 @@ jobs:
         run: docker build -t onoffdash-file:test ./network-monitor/services/file-service
 
       - name: Scan File Service Image
-        uses: aquasecurity/trivy-action@18f2510ee396bbf400402947b394f2dd8c87dbb0 # v0.29.0
+        uses: aquasecurity/trivy-action@d2a0b60797ff03db6132bd4e2b293f9b37081297 # v0.36.0 (resolves setup-trivy v0.3.1)
         with:
           image-ref: 'onoffdash-file:test'
           format: 'table'
@@ -287,6 +287,7 @@ jobs:
     permissions:
       contents: read
     needs: [backend-quality, agent-quality, frontend-quality, python-microservices-quality]
+    if: always() && !cancelled()
     steps:
       - name: Checkout Code
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -311,7 +312,24 @@ jobs:
           JWT_SECRET: "ci-pipeline-test-jwt-secret-key-at-least-32-chars-long"
           AGENT_API_KEY: "ci-pipeline-test-agent-key-at-least-32-chars-long"
           CORS_ORIGINS: "http://localhost:80,http://localhost:5173"
+          AUTH_INTROSPECTION_SECRET: "ci-pipeline-introspection-secret-min-32-chars"
         run: docker compose config --quiet
 
       - name: Run Clean Docker Deployment Smoke Test
         run: ./network-monitor/scripts/test_clean_docker_install.sh
+
+      - name: Enforce Prerequisite Quality Jobs Passed
+        run: |
+          echo "Verifying all prerequisite jobs succeeded..."
+          if [ "${{ needs.backend-quality.result }}" != "success" ] || \
+             [ "${{ needs.agent-quality.result }}" != "success" ] || \
+             [ "${{ needs.frontend-quality.result }}" != "success" ] || \
+             [ "${{ needs.python-microservices-quality.result }}" != "success" ]; then
+            echo "ERROR: Docker deployment smoke test executed, but one or more prerequisite quality jobs failed:"
+            echo "  backend-quality: ${{ needs.backend-quality.result }}"
+            echo "  agent-quality: ${{ needs.agent-quality.result }}"
+            echo "  frontend-quality: ${{ needs.frontend-quality.result }}"
+            echo "  python-microservices-quality: ${{ needs.python-microservices-quality.result }}"
+            exit 1
+          fi
+          echo "All prerequisite quality jobs passed."
