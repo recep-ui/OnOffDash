@@ -16,7 +16,8 @@ const {
     setUserSession, 
     invalidateUserSessions, 
     markUserDeleted,
-    verifyAccessToken 
+    verifyAccessToken,
+    signAccessToken
 } = require('../middleware/auth');
 const { parseCidr, ipToLong, longToIp } = require('../utils/ipamUtils');
 
@@ -388,9 +389,8 @@ describe('Real Production Route Integration Test Suite', () => {
         });
 
         it('should reject expired JWT access token', async () => {
-            const expiredToken = jwt.sign(
+            const expiredToken = signAccessToken(
                 { id: 1, username: 'admin', role: 'admin', token_version: 1 },
-                process.env.JWT_SECRET,
                 { expiresIn: '-1s' }
             );
 
@@ -403,9 +403,8 @@ describe('Real Production Route Integration Test Suite', () => {
         });
 
         it('should reject token with token_version mismatch against DB', async () => {
-            const oldToken = jwt.sign(
+            const oldToken = signAccessToken(
                 { id: 1, username: 'admin', role: 'admin', token_version: 1 },
-                process.env.JWT_SECRET,
                 { expiresIn: '15m' }
             );
 
@@ -419,9 +418,8 @@ describe('Real Production Route Integration Test Suite', () => {
         });
 
         it('should keep old token invalid after authentication cache clear / server restart simulation', async () => {
-            const oldToken = jwt.sign(
+            const oldToken = signAccessToken(
                 { id: 1, username: 'admin', role: 'admin', token_version: 1 },
-                process.env.JWT_SECRET,
                 { expiresIn: '15m' }
             );
 
@@ -439,9 +437,8 @@ describe('Real Production Route Integration Test Suite', () => {
         });
 
         it('should reject access token for deleted user even if JWT is valid', async () => {
-            const userToken = jwt.sign(
+            const userToken = signAccessToken(
                 { id: 1, username: 'admin', role: 'admin', token_version: 1 },
-                process.env.JWT_SECRET,
                 { expiresIn: '15m' }
             );
 
@@ -456,9 +453,8 @@ describe('Real Production Route Integration Test Suite', () => {
         });
 
         it('should reject token when user role has been changed in DB', async () => {
-            const adminToken = jwt.sign(
+            const adminToken = signAccessToken(
                 { id: 1, username: 'admin', role: 'admin', token_version: 1 },
-                process.env.JWT_SECRET,
                 { expiresIn: '15m' }
             );
 
@@ -473,9 +469,8 @@ describe('Real Production Route Integration Test Suite', () => {
         });
 
         it('Socket.IO auth shared validation rejects old token version', async () => {
-            const oldToken = jwt.sign(
+            const oldToken = signAccessToken(
                 { id: 1, username: 'admin', role: 'admin', token_version: 1 },
-                process.env.JWT_SECRET,
                 { expiresIn: '15m' }
             );
 
@@ -646,9 +641,8 @@ describe('Real Production Route Integration Test Suite', () => {
 
     describe('6. Printer Scan Conflict', () => {
         it('returns 409 Conflict when printer scan is already running', async () => {
-            const adminToken = jwt.sign(
+            const adminToken = signAccessToken(
                 { id: 1, username: 'admin', role: 'admin', token_version: 1 },
-                process.env.JWT_SECRET,
                 { expiresIn: '15m' }
             );
 
@@ -703,9 +697,8 @@ describe('Real Production Route Integration Test Suite', () => {
         });
 
         it('/suggest accepts real /23 CIDR and returns host in second block when first block full', async () => {
-            const adminToken = jwt.sign(
+            const adminToken = signAccessToken(
                 { id: 1, username: 'admin', role: 'admin', token_version: 1 },
-                process.env.JWT_SECRET,
                 { expiresIn: '15m' }
             );
 
@@ -726,9 +719,8 @@ describe('Real Production Route Integration Test Suite', () => {
         });
 
         it('/suggest returns 400 for invalid CIDR and IPv6', async () => {
-            const adminToken = jwt.sign(
+            const adminToken = signAccessToken(
                 { id: 1, username: 'admin', role: 'admin', token_version: 1 },
-                process.env.JWT_SECRET,
                 { expiresIn: '15m' }
             );
 

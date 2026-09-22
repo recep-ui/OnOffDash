@@ -78,10 +78,11 @@ router.post('/login', loginLimiter, async (req, res) => {
                 [user.id, tokenHash, tokenVersion, familyId]
             );
         } catch (rtErr) {
-            console.warn('Notice: user_refresh_tokens insert:', rtErr.message);
+            console.error('Failed to persist refresh token session:', rtErr.message);
+            return res.status(500).json({ error: 'Giriş oturumu oluşturulamadı. Lütfen tekrar deneyiniz.' });
         }
 
-        // HttpOnly, SameSite=Strict cookie ata (JavaScript erişemez)
+        // HttpOnly, SameSite=Strict cookie ata (SADECE veritabanı kaydı başarılı ise)
         setRefreshTokenCookie(res, rawRefreshToken);
         setUserSession(user.id, { token_version: tokenVersion, role: user.role });
 
@@ -169,8 +170,11 @@ router.post('/change-password', authenticateToken, async (req, res) => {
                  VALUES ($1, $2, $3, $4, DATEADD(day, 7, GETDATE()), GETDATE())`,
                 [req.user.id, tokenHash, newTokenVersion, familyId]
             );
-        } catch (_) {}
-        setRefreshTokenCookie(res, rawRefreshToken);
+            setRefreshTokenCookie(res, rawRefreshToken);
+        } catch (rtErr) {
+            console.error('Failed to persist renewed refresh token session:', rtErr.message);
+            return res.status(500).json({ error: 'Parola güncellendi ancak yeni oturum başlatılamadı. Lütfen tekrar giriş yapınız.' });
+        }
 
         // Şifre güncellendikten sonra kısıtlaması kaldırılmış ve güncel token_version ile yeni bir access token üret
         const newToken = signAccessToken({ 
@@ -343,8 +347,27 @@ router.post('/logout', async (req, res) => {
     }
 });
 
-// POST /api/auth/introspect — Authoritative token introspection for microservices (PDF/File tools)
+const AUTH_INTROSPECTION_SECRET = process.env.AUTH_INTROSPECTION_SECRET || 
+    (process.env.NODE_ENV === 'test' ? 'ci-test-introspection-secret-key-min-32-chars' : null);
+
+// POST /api/auth/introspect — Authoritative token introspection for internal microservices (PDF/File tools)
 router.post('/introspect', async (req, res) => {
+    // 1. Internal service authentication check
+    const internalKey = req.headers ? req.headers['x-internal-service-key'] : null;
+    if (!AUTH_INTROSPECTION_SECRET || !internalKey || typeof internalKey !== 'string') {
+        return res.status(401).json({ active: false, error: 'Unauthorized internal service' });
+    }
+
+    try {
+        const clientBuf = Buffer.from(internalKey);
+        const secretBuf = Buffer.from(AUTH_INTROSPECTION_SECRET);
+        if (clientBuf.length !== secretBuf.length || !crypto.timingSafeEqual(clientBuf, secretBuf)) {
+            return res.status(401).json({ active: false, error: 'Unauthorized internal service' });
+        }
+    } catch (_) {
+        return res.status(401).json({ active: false, error: 'Unauthorized internal service' });
+    }
+
     try {
         const authHeader = req.headers ? req.headers['authorization'] : null;
         const token = req.body?.token || (authHeader && authHeader.startsWith('Bearer ') ? authHeader.split(' ')[1] : null);

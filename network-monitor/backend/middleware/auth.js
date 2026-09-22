@@ -11,6 +11,9 @@ const ROLE_HIERARCHY = {
 };
 
 // --- Key Management for Asymmetric & Symmetric JWT ---
+const JWT_ISSUER = 'onoffdash-auth';
+const JWT_AUDIENCE = 'onoffdash';
+
 let JWT_PRIVATE_KEY = process.env.JWT_PRIVATE_KEY;
 let JWT_PUBLIC_KEY = process.env.JWT_PUBLIC_KEY;
 
@@ -24,22 +27,36 @@ if (!JWT_PUBLIC_KEY && process.env.JWT_PUBLIC_KEY_PATH && fs.existsSync(process.
 let activePrivateKey = JWT_PRIVATE_KEY;
 let activePublicKey = JWT_PUBLIC_KEY;
 
-if (!activePrivateKey) {
-    if (process.env.JWT_SECRET && process.env.JWT_SECRET.length >= 32) {
-        activePrivateKey = process.env.JWT_SECRET;
-        activePublicKey = process.env.JWT_SECRET;
-    } else {
-        // Ephemeral in-memory RSA 2048 keypair for dev/test environments
-        const keypair = crypto.generateKeyPairSync('rsa', {
-            modulusLength: 2048,
-            publicKeyEncoding: { type: 'spki', format: 'pem' },
-            privateKeyEncoding: { type: 'pkcs8', format: 'pem' }
-        });
-        activePrivateKey = keypair.privateKey;
-        activePublicKey = keypair.publicKey;
+if (process.env.NODE_ENV === 'production') {
+    // In production, asymmetric RSA keys are strictly required (fail closed)
+    if (!activePrivateKey || typeof activePrivateKey !== 'string' || !activePrivateKey.includes('BEGIN')) {
+        throw new Error(
+            'FATAL CONFIGURATION ERROR: Asymmetric RSA private key (JWT_PRIVATE_KEY / JWT_PRIVATE_KEY_PATH) ' +
+            'is required in production mode. Refusing startup with symmetric keys.'
+        );
     }
-} else if (!activePublicKey && typeof activePrivateKey === 'string' && activePrivateKey.includes('BEGIN')) {
-    activePublicKey = crypto.createPublicKey(activePrivateKey).export({ type: 'spki', format: 'pem' });
+    if (!activePublicKey) {
+        activePublicKey = crypto.createPublicKey(activePrivateKey).export({ type: 'spki', format: 'pem' });
+    }
+} else {
+    // Test / Development environments: allow symmetric fallback or generate ephemeral RSA keypair
+    if (!activePrivateKey) {
+        if (process.env.JWT_SECRET && process.env.JWT_SECRET.length >= 32) {
+            activePrivateKey = process.env.JWT_SECRET;
+            activePublicKey = process.env.JWT_SECRET;
+        } else {
+            // Ephemeral in-memory RSA 2048 keypair for dev/test environments
+            const keypair = crypto.generateKeyPairSync('rsa', {
+                modulusLength: 2048,
+                publicKeyEncoding: { type: 'spki', format: 'pem' },
+                privateKeyEncoding: { type: 'pkcs8', format: 'pem' }
+            });
+            activePrivateKey = keypair.privateKey;
+            activePublicKey = keypair.publicKey;
+        }
+    } else if (!activePublicKey && typeof activePrivateKey === 'string' && activePrivateKey.includes('BEGIN')) {
+        activePublicKey = crypto.createPublicKey(activePrivateKey).export({ type: 'spki', format: 'pem' });
+    }
 }
 
 function isAsymmetric() {
@@ -47,7 +64,7 @@ function isAsymmetric() {
 }
 
 function getAllowedAlgorithms() {
-    return isAsymmetric() ? ['RS256'] : ['HS256', 'RS256'];
+    return isAsymmetric() ? ['RS256'] : ['HS256'];
 }
 
 function getPublicKey() {
@@ -55,13 +72,15 @@ function getPublicKey() {
 }
 
 /**
- * Signs an access token with explicit algorithm and standard claims.
+ * Signs an access token with explicit algorithm and standard claims (iss, aud).
  */
 function signAccessToken(payload, options = {}) {
     const algorithm = isAsymmetric() ? 'RS256' : 'HS256';
     return jwt.sign(payload, activePrivateKey, {
         algorithm,
         expiresIn: process.env.JWT_EXPIRES_IN || '15m',
+        issuer: JWT_ISSUER,
+        audience: JWT_AUDIENCE,
         ...options
     });
 }
@@ -102,8 +121,8 @@ function clearSessionCache() {
 
 /**
  * Shared core token verification function.
- * Validates signature, algorithm restriction, expiration, user existence in DB,
- * persistent token_version requirement, role, and password-change state.
+ * Validates signature, algorithm restriction, expiration, issuer, audience,
+ * user existence in DB, persistent token_version requirement, role, and password-change state.
  *
  * @param {string} token - Raw JWT token
  * @returns {Promise<Object>} Decoded and verified user payload
@@ -119,7 +138,9 @@ async function verifyAccessToken(token) {
     let decoded;
     try {
         decoded = jwt.verify(token, verifyKey, {
-            algorithms: getAllowedAlgorithms()
+            algorithms: getAllowedAlgorithms(),
+            issuer: JWT_ISSUER,
+            audience: JWT_AUDIENCE
         });
     } catch (jwtErr) {
         const err = new Error(jwtErr.name === 'TokenExpiredError' 

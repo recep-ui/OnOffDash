@@ -17,6 +17,7 @@ except ImportError:
         HTTP_401_UNAUTHORIZED = 401
         HTTP_403_FORBIDDEN = 403
         HTTP_500_INTERNAL_SERVER_ERROR = 500
+        HTTP_503_SERVICE_UNAVAILABLE = 503
     def Security(x): return None
     class HTTPBearer:
         def __init__(self, *a, **k): pass
@@ -26,6 +27,9 @@ except ImportError:
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 security = HTTPBearer(auto_error=False)
+
+JWT_ISSUER = "onoffdash-auth"
+JWT_AUDIENCE = "onoffdash"
 
 def get_verification_key_and_alg():
     """Returns the verification key (public RSA key or symmetric secret) and permitted algorithms."""
@@ -42,24 +46,38 @@ def get_verification_key_and_alg():
     if public_key and "-----BEGIN" in public_key:
         return public_key.strip(), ["RS256"]
 
+    # Production must NOT fall back to HS256 / JWT_SECRET
+    app_env = (os.getenv("APP_ENV") or os.getenv("NODE_ENV") or "").lower()
+    if app_env == "production":
+        return None, []
+
     secret = os.getenv("JWT_SECRET")
     if secret:
-        return secret, ["HS256", "RS256"]
+        return secret, ["HS256"]
 
     return None, []
 
 def check_authoritative_revocation(token: str, user_id: int, token_version: int, role: str) -> None:
     """
     Validates token against authoritative session state via backend introspection or direct DB query.
-    Fails closed if the token is revoked, user deleted, role changed, or token_version incremented.
+    Fails closed with HTTP 503 if authoritative state cannot be checked.
     """
     introspection_url = os.getenv("AUTH_INTROSPECTION_URL")
+    introspection_secret = os.getenv("AUTH_INTROSPECTION_SECRET") or os.getenv("INTERNAL_SERVICE_SECRET", "")
+
     if introspection_url:
         try:
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {token}"
+            }
+            if introspection_secret:
+                headers["X-Internal-Service-Key"] = introspection_secret
+
             req = urllib.request.Request(
                 introspection_url,
                 data=json.dumps({"token": token}).encode("utf-8"),
-                headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}"},
+                headers=headers,
                 method="POST"
             )
             with urllib.request.urlopen(req, timeout=3) as resp:
@@ -80,18 +98,27 @@ def check_authoritative_revocation(token: str, user_id: int, token_version: int,
                         status_code=status.HTTP_401_UNAUTHORIZED,
                         detail="Oturum sonlandırıldı veya parola değiştirildi. Lütfen tekrar giriş yapınız."
                     )
-                return
+                if bool(active_user.get("must_change_password")):
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="Parola değiştirilmesi gerekmektedir."
+                    )
+                return  # Introspection validated successfully
+        except HTTPException:
+            raise
         except urllib.error.HTTPError as he:
-            try:
-                err_body = json.loads(he.read().decode("utf-8"))
-                err_detail = err_body.get("error", "Oturum doğrulanamadı.")
-            except Exception:
-                err_detail = "Oturum sonlandırıldı veya geçersiz kılındı."
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail=err_detail
-            )
-        except urllib.error.URLError:
+            if he.code in (401, 403):
+                try:
+                    err_body = json.loads(he.read().decode("utf-8"))
+                    err_detail = err_body.get("error", "Oturum doğrulanamadı.")
+                except Exception:
+                    err_detail = "Oturum sonlandırıldı veya geçersiz kılındı."
+                raise HTTPException(
+                    status_code=he.code,
+                    detail=err_detail
+                )
+            # 5xx or server errors: fall back to DB check
+        except Exception:
             pass  # Fall back to DB check if introspection is unreachable
 
     # Direct database fallback if MSSQL environment is configured
@@ -133,10 +160,17 @@ def check_authoritative_revocation(token: str, user_id: int, token_version: int,
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Parola değiştirilmesi gerekmektedir."
                 )
+            return  # DB check validated successfully
         except HTTPException:
             raise
         except Exception:
             pass
+
+    # FAIL CLOSED: Authoritative revocation state could not be verified
+    raise HTTPException(
+        status_code=getattr(status, "HTTP_503_SERVICE_UNAVAILABLE", 503),
+        detail="Authentication authority unavailable"
+    )
 
 def verify_jwt_token(token: str) -> dict:
     """Verifies and decodes a JWT token with explicit algorithm, required claims, and authoritative revocation."""
@@ -158,8 +192,14 @@ def verify_jwt_token(token: str) -> dict:
             token,
             verify_key,
             algorithms=algorithms,
+            issuer=JWT_ISSUER,
+            audience=JWT_AUDIENCE,
             options={
-                "require": ["exp"]
+                "require": ["exp", "iat", "iss", "aud"],
+                "verify_iss": True,
+                "verify_aud": True,
+                "verify_exp": True,
+                "verify_iat": True,
             }
         )
 
@@ -198,6 +238,16 @@ def verify_jwt_token(token: str) -> dict:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Oturum süresi dolmuş."
+        )
+    except jwt.InvalidIssuerError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Geçersiz kimlik sağlayıcı (issuer mismatch)."
+        )
+    except jwt.InvalidAudienceError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Geçersiz kimlik hedef kitlesi (audience mismatch)."
         )
     except jwt.MissingRequiredClaimError:
         raise HTTPException(

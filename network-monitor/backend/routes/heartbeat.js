@@ -52,6 +52,18 @@ router.post('/', authenticateAgent, async (req, res) => {
                 });
             }
             targetDeviceId = existingRes.rows[0].id;
+
+            // Security check: Devices with enrolled per-device credentials cannot be updated via legacy shared key
+            const enrolledCreds = await pool.query(
+                'SELECT COUNT(*) as cred_count FROM agent_credentials WHERE device_id = $1 AND is_revoked = 0',
+                [targetDeviceId]
+            );
+            const count = parseInt(enrolledCreds.rows[0]?.cred_count || 0, 10);
+            if (count > 0) {
+                return res.status(403).json({
+                    error: 'Bu cihaz için cihaza özel kimlik doğrulama tanımlıdır. Eski paylaşımlı anahtarla güncellenemez.'
+                });
+            }
         }
 
         // 1. Mevcut agent durumunu kontrol et (agent_status geçişinde event yaymak için)
