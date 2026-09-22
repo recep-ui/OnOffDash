@@ -1,0 +1,2 @@
+# Ignore all private and public PEM keys generated locally
+*.pem

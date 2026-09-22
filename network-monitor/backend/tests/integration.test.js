@@ -107,7 +107,7 @@ describe('Integration & Security Infrastructure Tests', () => {
         it('should block access to general routes with 403 PASSWORD_CHANGE_REQUIRED', () => {
             const activeSecret = process.env.JWT_SECRET;
             const expiredUserToken = jwt.sign(
-                { id: 1, username: 'bootstrap_admin', role: 'admin', must_change_password: 1 },
+                { id: 1, username: 'bootstrap_admin', role: 'admin', token_version: 1, must_change_password: 1 },
                 activeSecret
             );
 
@@ -128,7 +128,7 @@ describe('Integration & Security Infrastructure Tests', () => {
         it('should permit access to /api/auth/me when must_change_password is true', () => {
             const activeSecret = process.env.JWT_SECRET;
             const expiredUserToken = jwt.sign(
-                { id: 1, username: 'bootstrap_admin', role: 'admin', must_change_password: 1 },
+                { id: 1, username: 'bootstrap_admin', role: 'admin', token_version: 1, must_change_password: 1 },
                 activeSecret
             );
 
@@ -148,7 +148,7 @@ describe('Integration & Security Infrastructure Tests', () => {
         it('should permit access to /api/auth/change-password when must_change_password is true', () => {
             const activeSecret = process.env.JWT_SECRET;
             const expiredUserToken = jwt.sign(
-                { id: 1, username: 'bootstrap_admin', role: 'admin', must_change_password: 1 },
+                { id: 1, username: 'bootstrap_admin', role: 'admin', token_version: 1, must_change_password: 1 },
                 activeSecret
             );
 

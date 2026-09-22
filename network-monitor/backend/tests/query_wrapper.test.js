@@ -15,17 +15,11 @@ describe('Query Conversion & Parameter Redaction', () => {
     });
 
     it('should mask password parameters when logging query errors', () => {
-        function maskParams(query, params) {
-            const lower = query.toLowerCase();
-            if (lower.includes('password') || lower.includes('token') || lower.includes('secret')) {
-                return params.map(p => typeof p === 'string' ? '***REDACTED***' : p);
-            }
-            return params;
-        }
+        const { maskParamsForLog } = require('../db/connection');
 
         const query = 'UPDATE users SET password_hash = $1 WHERE username = $2';
         const params = ['super-secret-password-or-hash', 'admin'];
-        const masked = maskParams(query, params);
+        const masked = maskParamsForLog(query, params);
 
         assert.strictEqual(masked[0], '***REDACTED***');
         assert.strictEqual(masked[1], '***REDACTED***');

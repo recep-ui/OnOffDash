@@ -1,0 +1,103 @@
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/network-monitor/backend"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    groups:
+      dependencies:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+    labels:
+      - "dependencies"
+      - "backend"
+      - "security"
+
+  - package-ecosystem: "npm"
+    directory: "/network-monitor/frontend"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    groups:
+      dependencies:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+    labels:
+      - "dependencies"
+      - "frontend"
+      - "security"
+
+  - package-ecosystem: "npm"
+    directory: "/network-monitor/agent"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    groups:
+      dependencies:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+    labels:
+      - "dependencies"
+      - "agent"
+      - "security"
+
+  - package-ecosystem: "pip"
+    directory: "/network-monitor/services/pdf-service"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    groups:
+      dependencies:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+    labels:
+      - "dependencies"
+      - "pdf-service"
+      - "security"
+
+  - package-ecosystem: "pip"
+    directory: "/network-monitor/services/file-service"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    groups:
+      dependencies:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+    labels:
+      - "dependencies"
+      - "file-service"
+      - "security"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+    labels:
+      - "dependencies"
+      - "github-actions"
+      - "security"

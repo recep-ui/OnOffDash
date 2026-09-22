@@ -129,6 +129,18 @@ app.use(express.json({ limit: '5mb' })); // Yazılım envanteri büyük olabilir
 // Socket.IO instance'ını Express app'e bağla
 app.set('io', io);
 
+// Global API rate limiting
+const rateLimit = require('express-rate-limit');
+const apiLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 1000,
+    standardHeaders: true,
+    legacyHeaders: false,
+    skip: () => process.env.NODE_ENV === 'test',
+    message: { error: 'Çok fazla istek yapıldı, lütfen daha sonra tekrar deneyiniz.' }
+});
+app.use('/api', apiLimiter);
+
 // Routes
 app.use('/api/auth', authRouter);
 app.use('/api/analytics', authenticateToken, analyticsRouter);

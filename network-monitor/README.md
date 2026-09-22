@@ -66,6 +66,13 @@ OnOffDash V2, kurumsal yerel ağlardaki bilgisayarları, sunucuları, yazıcıla
 4. Tarayıcınızdan `http://localhost` adresine giderek platforma erişin.
    - Varsayılan bootstrap yönetici hesabı: İlk açılışta `BOOTSTRAP_ADMIN_USERNAME` ve `BOOTSTRAP_ADMIN_PASSWORD` ortam değişkenlerinden otomatik oluşturulur.
 
+5. **Yerel Ağdaki (LAN) Diğer Cihazlardan Erişim:**
+   - Sunucunun yerel IP adresini (`hostname -I` ile öğrenebilirsiniz, örn: `10.0.80.113`) `.env` dosyasındaki `CORS_ORIGINS` alanına ekleyin:
+     ```env
+     CORS_ORIGINS=http://localhost,http://localhost:80,http://10.0.80.113,http://10.0.80.113:80
+     ```
+   - Aynı ağdaki diğer bilgisayar veya mobil cihazların tarayıcısından `http://<SUNUCU_IP_ADRESI>` adresine giderek arayüze erişebilirsiniz.
+
 > **Geliştirici İpucu:** Eğer yerel geliştirme sırasında container portlarını doğrudan host makinenize bağlamak isterseniz:
 > `cp docker-compose.override.yml.example docker-compose.override.yml`
 

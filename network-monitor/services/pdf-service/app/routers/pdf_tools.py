@@ -47,6 +47,21 @@ async def get_preview(file: UploadFile = File(...), user: dict = Depends(require
             user_id=user_id
         )
         return {"previews": previews}
+    except ValueError as ve:
+        finished_at = datetime.datetime.now()
+        logger.log_job(
+            operation_type="preview",
+            input_file_count=1,
+            total_input_size=file_size,
+            output_file_size=None,
+            status="error",
+            created_at=created_at,
+            finished_at=finished_at,
+            expires_at=None,
+            error_message=str(ve),
+            user_id=user_id
+        )
+        raise HTTPException(status_code=400, detail=str(ve))
     except Exception as e:
         finished_at = datetime.datetime.now()
         logger.log_job(
@@ -453,11 +468,24 @@ async def download_file(file_id: str, background_tasks: BackgroundTasks, user: d
     """
     Serves the output PDF file and checks ownership against requesting user.
     """
-    safe_name = os.path.basename(file_id)
-    file_path = os.path.join(OUTPUT_DIR, safe_name)
-    
-    if not os.path.exists(file_path):
+    import re
+    from pathlib import Path
+
+    if not re.match(r"^(u\d+_)?[0-9a-fA-F\-]{8,64}\.[a-zA-Z0-9]{1,10}$", file_id):
+        raise HTTPException(status_code=400, detail="Invalid file path.")
+
+    try:
+        base_dir = Path(OUTPUT_DIR).resolve()
+        available_files = {f.name: f for f in base_dir.iterdir() if f.is_file()}
+    except Exception:
+        available_files = {}
+
+    if file_id not in available_files:
         raise HTTPException(status_code=404, detail="File not found or expired.")
+
+    target_file = available_files[file_id]
+    file_path = str(target_file.resolve())
+    safe_name = target_file.name
         
     user_id = user.get("id")
     role = user.get("role", "")

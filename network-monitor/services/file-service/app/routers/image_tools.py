@@ -68,6 +68,21 @@ async def resize_image_endpoint(
             "original_size": file_size,
             "new_size": output_size
         }
+    except ValueError as ve:
+        finished_at = datetime.datetime.now()
+        logger.log_job(
+            operation_type="image_resize",
+            input_file_count=1,
+            total_input_size=file_size,
+            output_file_size=None,
+            status="error",
+            created_at=created_at,
+            finished_at=finished_at,
+            expires_at=None,
+            error_message=str(ve),
+            user_id=user_id
+        )
+        raise HTTPException(status_code=400, detail=str(ve))
     except Exception as e:
         finished_at = datetime.datetime.now()
         logger.log_job(
@@ -131,6 +146,21 @@ async def compress_image_endpoint(
             "original_size": file_size,
             "new_size": output_size
         }
+    except ValueError as ve:
+        finished_at = datetime.datetime.now()
+        logger.log_job(
+            operation_type="image_compress",
+            input_file_count=1,
+            total_input_size=file_size,
+            output_file_size=None,
+            status="error",
+            created_at=created_at,
+            finished_at=finished_at,
+            expires_at=None,
+            error_message=str(ve),
+            user_id=user_id
+        )
+        raise HTTPException(status_code=400, detail=str(ve))
     except Exception as e:
         finished_at = datetime.datetime.now()
         logger.log_job(
@@ -194,6 +224,21 @@ async def png_to_jpg_endpoint(
             "original_size": file_size,
             "new_size": output_size
         }
+    except ValueError as ve:
+        finished_at = datetime.datetime.now()
+        logger.log_job(
+            operation_type="png_to_jpg",
+            input_file_count=1,
+            total_input_size=file_size,
+            output_file_size=None,
+            status="error",
+            created_at=created_at,
+            finished_at=finished_at,
+            expires_at=None,
+            error_message=str(ve),
+            user_id=user_id
+        )
+        raise HTTPException(status_code=400, detail=str(ve))
     except Exception as e:
         finished_at = datetime.datetime.now()
         logger.log_job(
@@ -250,6 +295,21 @@ async def jpg_to_png_endpoint(
             "original_size": file_size,
             "new_size": output_size
         }
+    except ValueError as ve:
+        finished_at = datetime.datetime.now()
+        logger.log_job(
+            operation_type="jpg_to_png",
+            input_file_count=1,
+            total_input_size=file_size,
+            output_file_size=None,
+            status="error",
+            created_at=created_at,
+            finished_at=finished_at,
+            expires_at=None,
+            error_message=str(ve),
+            user_id=user_id
+        )
+        raise HTTPException(status_code=400, detail=str(ve))
     except Exception as e:
         finished_at = datetime.datetime.now()
         logger.log_job(
