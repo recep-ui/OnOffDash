@@ -59,7 +59,7 @@ if [ ! -f "${PROJECT_DIR}/keys/jwt_private.pem" ] || [ ! -f "${PROJECT_DIR}/keys
   echo "[*] Generating test 2048-bit RSA keypair in ${PROJECT_DIR}/keys..."
   openssl genrsa -out "${PROJECT_DIR}/keys/jwt_private.pem" 2048
   openssl rsa -in "${PROJECT_DIR}/keys/jwt_private.pem" -pubout -out "${PROJECT_DIR}/keys/jwt_public.pem"
-  chmod 600 "${PROJECT_DIR}/keys/jwt_private.pem"
+  chmod 644 "${PROJECT_DIR}/keys/jwt_private.pem"
   chmod 644 "${PROJECT_DIR}/keys/jwt_public.pem"
 fi
 
@@ -96,7 +96,11 @@ echo "[+] Clean test environment generated at ${TEST_ENV_FILE}"
 
 echo "=== [3/6] Starting Fresh Docker Stack Build & Startup ==="
 ${DOCKER_CMD} compose --env-file "${TEST_ENV_FILE}" down -v --remove-orphans || true
-${DOCKER_CMD} compose --env-file "${TEST_ENV_FILE}" up -d --build
+if ! ${DOCKER_CMD} compose --env-file "${TEST_ENV_FILE}" up -d --build; then
+  echo "[-] ERROR: docker compose up failed. Dumping container logs:"
+  ${DOCKER_CMD} compose --env-file "${TEST_ENV_FILE}" logs --tail 100
+  exit 1
+fi
 
 echo "=== [4/6] Polling Database and db-init Service Completion ==="
 
