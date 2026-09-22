@@ -47,6 +47,21 @@ async def get_preview(file: UploadFile = File(...), user: dict = Depends(require
             user_id=user_id
         )
         return {"previews": previews}
+    except ValueError as ve:
+        finished_at = datetime.datetime.now()
+        logger.log_job(
+            operation_type="preview",
+            input_file_count=1,
+            total_input_size=file_size,
+            output_file_size=None,
+            status="error",
+            created_at=created_at,
+            finished_at=finished_at,
+            expires_at=None,
+            error_message=str(ve),
+            user_id=user_id
+        )
+        raise HTTPException(status_code=400, detail=str(ve))
     except Exception as e:
         finished_at = datetime.datetime.now()
         logger.log_job(
@@ -453,10 +468,17 @@ async def download_file(file_id: str, background_tasks: BackgroundTasks, user: d
     """
     Serves the output PDF file and checks ownership against requesting user.
     """
+    if ".." in file_id or "/" in file_id or "\\" in file_id or "\0" in file_id:
+        raise HTTPException(status_code=400, detail="Invalid file path.")
+
     safe_name = os.path.basename(file_id)
-    file_path = os.path.join(OUTPUT_DIR, safe_name)
-    
-    if not os.path.exists(file_path):
+    real_out_dir = os.path.realpath(OUTPUT_DIR)
+    file_path = os.path.realpath(os.path.join(OUTPUT_DIR, safe_name))
+
+    if not file_path.startswith(real_out_dir + os.sep) and file_path != real_out_dir:
+        raise HTTPException(status_code=400, detail="Invalid file path.")
+
+    if not os.path.exists(file_path) or not os.path.isfile(file_path):
         raise HTTPException(status_code=404, detail="File not found or expired.")
         
     user_id = user.get("id")

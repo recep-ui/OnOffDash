@@ -70,10 +70,17 @@ async def download_file_endpoint(file_id: str, user: dict = Depends(require_auth
     """
     Serves generated output files securely. Prevents path traversal and enforces ownership.
     """
+    if ".." in file_id or "/" in file_id or "\\" in file_id or "\0" in file_id:
+        raise HTTPException(status_code=400, detail="Geçersiz dosya yolu.")
+
     safe_name = os.path.basename(file_id)
-    file_path = os.path.join(OUTPUT_DIR, safe_name)
+    real_out_dir = os.path.realpath(OUTPUT_DIR)
+    file_path = os.path.realpath(os.path.join(OUTPUT_DIR, safe_name))
+
+    if not file_path.startswith(real_out_dir + os.sep) and file_path != real_out_dir:
+        raise HTTPException(status_code=400, detail="Geçersiz dosya yolu.")
     
-    if not os.path.exists(file_path):
+    if not os.path.exists(file_path) or not os.path.isfile(file_path):
         raise HTTPException(status_code=404, detail="Dosya bulunamadı veya süresi doldu.")
         
     user_id = user.get("id")
