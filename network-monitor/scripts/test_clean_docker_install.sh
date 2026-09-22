@@ -151,7 +151,7 @@ echo "=== [5/6] Polling Backend, Frontend, and Microservices Health ==="
 
 echo "[*] Waiting for backend (network_monitor_backend) to become healthy..."
 BACKEND_READY=0
-for i in $(seq 1 30); do
+for i in $(seq 1 45); do
   STATUS=$(${DOCKER_CMD} inspect --format='{{json .State.Health.Status}}' network_monitor_backend 2>/dev/null || echo '"unknown"')
   if [[ "$STATUS" == '"healthy"' ]]; then
     echo "[+] Backend container is healthy! (${i}s)"
