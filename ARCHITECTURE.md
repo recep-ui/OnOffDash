@@ -49,8 +49,9 @@ graph TD
 * **Technology:** Node.js 20, Express 4, Socket.IO 4, MSSQL (`mssql` / `tedious`).
 * **Responsibilities:**
   - REST API for authentication, device management, IPAM, and system diagnostics.
-  - Asymmetric RS256 JWT issuance and RFC 7662 token introspection (`POST /api/auth/introspect`).
-  - Atomic refresh token rotation with whole-family revocation on replay detection.
+  - Production-enforced asymmetric RS256 JWT issuance using private key (`jwt_private.pem`).
+  - Protected RFC 7662 token introspection (`POST /api/auth/introspect`) secured by `X-Internal-Service-Key` and blocked externally by Nginx.
+  - Fail-closed refresh token persistence and atomic rotation with whole-family revocation on replay detection.
   - Authoritative distributed token revocation using bounded 5-second session cache backed by MSSQL `users.token_version`.
   - Real-time event broadcasting over Socket.IO with strict JWT authentication.
   - `PingService`: Delta-only status logging and ICMP polling with configurable concurrency (`PING_CONCURRENCY`).
@@ -65,7 +66,7 @@ graph TD
   - Real-time operations dashboard, device detail modals, IPAM visualizer, and print fleet monitor.
   - In-memory access token storage (no `localStorage` or `sessionStorage` token leakage).
   - Silent token refresh via HttpOnly cookies with automatic retry and loop breaking.
-  - Document-layer Content-Security-Policy (CSP) enforced by Nginx.
+  - Document-layer Content-Security-Policy (CSP) enforced by Nginx (`connect-src 'self' wss:` in SSL).
 * **Port:** `80` (HTTP development) / `443` (Production TLS).
 
 ### 4. Microservices (`pdf-service` & `file-service`)
@@ -73,7 +74,8 @@ graph TD
 * **Responsibilities:**
   - PDF manipulation: merge, split, reorder, compress, watermark, preview thumbnails.
   - Image manipulation: resize, compress, PNG/JPG conversion.
-  - Asymmetric RS256 JWT verification with authoritative revocation checks against MSSQL or backend `/api/auth/introspect`.
+  - Asymmetric RS256 JWT verification using only public key (`jwt_public.pem`). Never possesses private key or symmetric secrets.
+  - Fail-closed authoritative revocation checks via backend introspection or MSSQL (fails closed with HTTP 503 if verification authorities are unreachable).
   - Resource exhaustion protection: bounded preview pages (max 50), dimension limits (max 4000/5000px), Pillow decompression bomb limits (`MAX_IMAGE_PIXELS = 25,000,000`).
   - Path traversal and ownership checks on all download operations.
 * **Ports:** `8001` (PDF), `8002` (File) (Internal only).

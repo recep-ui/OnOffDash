@@ -7,13 +7,16 @@ Before deploying OnOffDash V2 to a production or corporate network environment, 
 ## 1. Secrets & Authentication
 
 - [ ] `.env` files are excluded from Git (`.gitignore` verified; no secret commits).
-- [ ] Asymmetric RS256 JWT keypair configured (`JWT_PRIVATE_KEY` / `JWT_PUBLIC_KEY`) or `JWT_SECRET` set to a cryptographically secure string of at least 32 characters.
+- [ ] Asymmetric RS256 2048-bit RSA keypair generated in `keys/` (`jwt_private.pem` 0600, `jwt_public.pem` 0644).
+- [ ] Production environment variables configured: `JWT_PRIVATE_KEY_PATH` (backend), `JWT_PUBLIC_KEY_PATH` (backend, microservices).
+- [ ] `AUTH_INTROSPECTION_SECRET` set to a cryptographically secure random string (at least 32 characters) shared between backend and Python microservices.
+- [ ] `JWT_SECRET` is NOT used or relied upon in production (`NODE_ENV=production` fails closed if RSA keys missing).
 - [ ] Per-device credentials (`agk_<keyId>.<secret>`) generated and deployed for all client agents.
 - [ ] `ALLOW_LEGACY_AGENT_AUTH` is unset or explicitly set to `false` in production.
 - [ ] `MSSQL_SA_PASSWORD` is strong (at least 16 chars with uppercase, lowercase, numbers, and symbols).
 - [ ] Initial administrator password (`BOOTSTRAP_ADMIN_PASSWORD`) changed immediately after first deployment.
 - [ ] Rate limiting is active on `/api/auth/login` (10 attempts per 15 minutes).
-- [ ] Refresh tokens rotate atomically and are stored strictly in `HttpOnly`, `SameSite=Strict`, `Secure` cookies.
+- [ ] Refresh tokens rotate atomically, fail closed on persistence errors, and are stored strictly in `HttpOnly`, `SameSite=Strict`, `Secure` cookies.
 
 ---
 
