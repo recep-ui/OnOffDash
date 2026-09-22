@@ -10,7 +10,8 @@ RUN pip install --no-cache-dir --upgrade pip "setuptools>=84.0.0" "wheel>=0.48.0
     && pip install --no-cache-dir --upgrade "setuptools>=84.0.0" "wheel>=0.48.0" "msgpack>=1.2.2" "jaraco.context>=6.1.2" \
     && rm -rf /usr/local/lib/python3.11/ensurepip \
     && (find / -name "*setuptools*70*" -exec rm -rf {} + 2>/dev/null || true) \
-    && (find / -name "*msgpack*1.1*" -exec rm -rf {} + 2>/dev/null || true)
+    && (find / -name "*msgpack*1.1*" -exec rm -rf {} + 2>/dev/null || true) \
+    && rm -rf /usr/lib/python3/dist-packages/*
 
 # Create storage directories and non-root app user
 RUN mkdir -p /storage/pdf-temp /storage/pdf-output \

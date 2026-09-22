@@ -167,24 +167,68 @@ if [ "$BACKEND_READY" -ne 1 ]; then
   exit 1
 fi
 
-echo "[*] Verifying HTTP endpoints via Nginx reverse proxy on port 8088..."
-HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8088/ || true)
-echo "[+] Frontend index response code: ${HTTP_CODE}"
-if [[ "$HTTP_CODE" != "200" ]]; then
-  echo "[-] WARNING: Frontend returned HTTP ${HTTP_CODE}"
-fi
+echo "[*] Waiting for Nginx reverse proxy on port 8088 to respond..."
+FRONTEND_READY=0
+for i in $(seq 1 30); do
+  HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8088/ || true)
+  if [[ "$HTTP_CODE" == "200" ]]; then
+    echo "[+] Frontend index responded HTTP 200! (${i}s)"
+    FRONTEND_READY=1
+    break
+  fi
+  sleep 1
+done
 
-BACKEND_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8088/api/health || true)
-echo "[+] Backend /api/health response code: ${BACKEND_CODE}"
-if [[ "$BACKEND_CODE" != "200" ]]; then
-  echo "[-] ERROR: Backend health check failed with HTTP ${BACKEND_CODE}"
+if [ "$FRONTEND_READY" -ne 1 ]; then
+  echo "[-] ERROR: Frontend on port 8088 failed to respond HTTP 200 (last code: ${HTTP_CODE})."
+  ${DOCKER_CMD} logs network_monitor_frontend || true
   exit 1
 fi
 
-PDF_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8088/api/pdf/health || true)
-echo "[+] PDF Service /api/pdf/health response code: ${PDF_CODE}"
+echo "[*] Verifying backend and microservice routes through Nginx..."
+BACKEND_CODE=""
+for i in $(seq 1 15); do
+  BACKEND_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8088/api/health || true)
+  if [[ "$BACKEND_CODE" == "200" ]]; then
+    echo "[+] Backend /api/health responded HTTP 200! (${i}s)"
+    break
+  fi
+  sleep 1
+done
 
-FILE_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8088/api/file-tools/health || true)
-echo "[+] File Service /api/file-tools/health response code: ${FILE_CODE}"
+if [[ "$BACKEND_CODE" != "200" ]]; then
+  echo "[-] ERROR: Backend health check failed with HTTP ${BACKEND_CODE}"
+  ${DOCKER_CMD} logs network_monitor_backend || true
+  ${DOCKER_CMD} logs network_monitor_frontend || true
+  exit 1
+fi
+
+PDF_CODE=""
+for i in $(seq 1 15); do
+  PDF_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8088/api/pdf/health || true)
+  if [[ "$PDF_CODE" == "200" ]]; then
+    echo "[+] PDF Service /api/pdf/health responded HTTP 200! (${i}s)"
+    break
+  fi
+  sleep 1
+done
+
+if [[ "$PDF_CODE" != "200" ]]; then
+  echo "[-] WARNING: PDF Service health check returned HTTP ${PDF_CODE}"
+fi
+
+FILE_CODE=""
+for i in $(seq 1 15); do
+  FILE_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8088/api/file-tools/health || true)
+  if [[ "$FILE_CODE" == "200" ]]; then
+    echo "[+] File Service /api/file-tools/health responded HTTP 200! (${i}s)"
+    break
+  fi
+  sleep 1
+done
+
+if [[ "$FILE_CODE" != "200" ]]; then
+  echo "[-] WARNING: File Service health check returned HTTP ${FILE_CODE}"
+fi
 
 echo "=== [6/6] All Verification Checks PASSED Successfully! ==="
