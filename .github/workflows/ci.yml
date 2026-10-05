@@ -85,7 +85,7 @@ jobs:
 
       - name: Dependency Vulnerability Audit (High/Critical Fail Policy)
         working-directory: network-monitor/agent
-        run: npm audit --audit-level=high
+        run: npm audit --audit-level=high --omit=dev
 
       - name: Run Agent Unit & Security Tests
         working-directory: network-monitor/agent

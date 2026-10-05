@@ -36,23 +36,18 @@ def get_verification_key_and_alg():
     public_key = os.getenv("JWT_PUBLIC_KEY")
     pub_key_path = os.getenv("JWT_PUBLIC_KEY_PATH")
 
-    if not public_key:
-        candidate_paths = [
-            pub_key_path,
-            "/etc/ssl/certs/jwt_public.pem",
-            os.path.join(BASE_DIR, "keys", "jwt_public.pem"),
-            os.path.join(BASE_DIR, "..", "keys", "jwt_public.pem"),
-        ]
-        for p in candidate_paths:
-            if p and os.path.isfile(p):
-                try:
-                    with open(p, "r", encoding="utf-8") as f:
-                        content = f.read()
-                    if content and "-----BEGIN" in content:
-                        public_key = content
-                        break
-                except Exception:
-                    pass
+    if not public_key and pub_key_path and os.path.exists(pub_key_path):
+        try:
+            with open(pub_key_path, "r", encoding="utf-8") as f:
+                public_key = f.read()
+        except Exception:
+            pass
+    elif not public_key and os.path.exists("/etc/ssl/certs/jwt_public.pem"):
+        try:
+            with open("/etc/ssl/certs/jwt_public.pem", "r", encoding="utf-8") as f:
+                public_key = f.read()
+        except Exception:
+            pass
 
     if public_key and "-----BEGIN" in public_key:
         return public_key.strip(), ["RS256"]
