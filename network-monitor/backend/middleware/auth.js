@@ -1,4 +1,5 @@
 const fs = require('fs');
+const path = require('path');
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const { pool } = require('../db/connection');
@@ -14,15 +15,39 @@ const ROLE_HIERARCHY = {
 const JWT_ISSUER = 'onoffdash-auth';
 const JWT_AUDIENCE = 'onoffdash';
 
-let JWT_PRIVATE_KEY = process.env.JWT_PRIVATE_KEY;
-let JWT_PUBLIC_KEY = process.env.JWT_PUBLIC_KEY;
+function loadKey(envKey, envPath, defaultContainerPath) {
+    if (envKey && typeof envKey === 'string' && envKey.trim().length > 0) {
+        return envKey;
+    }
+    const candidates = [];
+    if (envPath) {
+        candidates.push(envPath);
+        candidates.push(path.resolve(process.cwd(), envPath));
+        candidates.push(path.resolve(__dirname, '..', envPath));
+        candidates.push(path.resolve(__dirname, '..', '..', envPath));
+    }
+    if (defaultContainerPath) {
+        candidates.push(defaultContainerPath);
+    }
+    // Only search local keys directory if explicitly configured or in production
+    if (process.env.NODE_ENV === 'production' && !envPath) {
+        candidates.push(path.resolve(process.cwd(), 'keys', path.basename(defaultContainerPath)));
+        candidates.push(path.resolve(__dirname, '..', 'keys', path.basename(defaultContainerPath)));
+        candidates.push(path.resolve(__dirname, '..', '..', 'keys', path.basename(defaultContainerPath)));
+    }
 
-if (!JWT_PRIVATE_KEY && process.env.JWT_PRIVATE_KEY_PATH && fs.existsSync(process.env.JWT_PRIVATE_KEY_PATH)) {
-    JWT_PRIVATE_KEY = fs.readFileSync(process.env.JWT_PRIVATE_KEY_PATH, 'utf8');
+    for (const p of candidates) {
+        try {
+            if (p && fs.existsSync(p) && fs.statSync(p).isFile()) {
+                return fs.readFileSync(p, 'utf8');
+            }
+        } catch (_) {}
+    }
+    return undefined;
 }
-if (!JWT_PUBLIC_KEY && process.env.JWT_PUBLIC_KEY_PATH && fs.existsSync(process.env.JWT_PUBLIC_KEY_PATH)) {
-    JWT_PUBLIC_KEY = fs.readFileSync(process.env.JWT_PUBLIC_KEY_PATH, 'utf8');
-}
+
+let JWT_PRIVATE_KEY = loadKey(process.env.JWT_PRIVATE_KEY, process.env.JWT_PRIVATE_KEY_PATH, '/etc/ssl/certs/jwt_private.pem');
+let JWT_PUBLIC_KEY = loadKey(process.env.JWT_PUBLIC_KEY, process.env.JWT_PUBLIC_KEY_PATH, '/etc/ssl/certs/jwt_public.pem');
 
 let activePrivateKey = JWT_PRIVATE_KEY;
 let activePublicKey = JWT_PUBLIC_KEY;

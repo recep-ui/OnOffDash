@@ -205,19 +205,30 @@ async function startServer() {
             // Architectural responsibility: db-init container performs DDL/migrations with SA privileges.
             // Backend runtime connects with onoffdash_app and verifies schema readiness.
             console.log('🔒 [RUNTIME] Connecting with least-privilege application account. Verifying schema readiness...');
-            try {
-                const schemaCheck = await dbConnection.pool.query(
-                    "SELECT COUNT(*) AS count FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME IN ('devices', 'users', 'printers', 'schema_migrations')"
-                );
-                const tableCount = parseInt(schemaCheck.rows[0]?.count || 0, 10);
-                if (tableCount < 4) {
-                    throw new Error(`Required database tables missing (found ${tableCount}/4). Ensure the db-init container has completed successfully.`);
+            let tableCount = 0;
+            for (let attempt = 1; attempt <= 15; attempt++) {
+                try {
+                    const schemaCheck = await dbConnection.pool.query(
+                        "SELECT COUNT(*) AS count FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME IN ('devices', 'users', 'printers', 'schema_migrations')"
+                    );
+                    tableCount = parseInt(schemaCheck.rows[0]?.count || 0, 10);
+                    if (tableCount >= 4) {
+                        break;
+                    }
+                    console.log(`⏳ [RUNTIME] Waiting for schema tables to be ready (attempt ${attempt}/15, found ${tableCount}/4)...`);
+                } catch (connErr) {
+                    if (attempt === 15) {
+                        console.error('❌ FATAL: Database schema readiness check failed:', connErr.message);
+                        throw connErr;
+                    }
+                    console.log(`⏳ [RUNTIME] Waiting for database connection (attempt ${attempt}/15: ${connErr.message})...`);
                 }
-                console.log('✅ [RUNTIME] Database schema verified successfully.');
-            } catch (schemaErr) {
-                console.error('❌ FATAL: Database schema readiness check failed:', schemaErr.message);
-                throw schemaErr;
+                await new Promise(r => setTimeout(r, 2000));
             }
+            if (tableCount < 4) {
+                throw new Error(`Required database tables missing (found ${tableCount}/4). Ensure the db-init container has completed successfully.`);
+            }
+            console.log('✅ [RUNTIME] Database schema verified successfully.');
         }
 
         const cronTasks = [];

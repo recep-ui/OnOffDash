@@ -67,9 +67,9 @@ OnOffDash V2, kurumsal yerel ağlardaki bilgisayarları, sunucuları, yazıcıla
    - Varsayılan bootstrap yönetici hesabı: İlk açılışta `BOOTSTRAP_ADMIN_USERNAME` ve `BOOTSTRAP_ADMIN_PASSWORD` ortam değişkenlerinden otomatik oluşturulur.
 
 5. **Yerel Ağdaki (LAN) Diğer Cihazlardan Erişim:**
-   - Sunucunun yerel IP adresini (`hostname -I` ile öğrenebilirsiniz, örn: `10.0.80.113`) `.env` dosyasındaki `CORS_ORIGINS` alanına ekleyin:
+   - Sunucunun yerel IP adresini (`hostname -I` ile öğrenebilirsiniz, örn: `10.0.80.110`) `.env` dosyasındaki `CORS_ORIGINS` alanına ekleyin:
      ```env
-     CORS_ORIGINS=http://localhost,http://localhost:80,http://10.0.80.113,http://10.0.80.113:80
+     CORS_ORIGINS=http://localhost,http://localhost:80,http://10.0.80.110,http://10.0.80.110:80
      ```
    - Aynı ağdaki diğer bilgisayar veya mobil cihazların tarayıcısından `http://<SUNUCU_IP_ADRESI>` adresine giderek arayüze erişebilirsiniz.
 

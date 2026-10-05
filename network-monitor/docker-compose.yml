@@ -79,8 +79,8 @@ services:
       - HEARTBEAT_TIMEOUT_SECONDS=${HEARTBEAT_TIMEOUT_SECONDS:-90}
       - RETENTION_DAYS=${RETENTION_DAYS:-30}
       - JWT_SECRET=${JWT_SECRET}
-      - JWT_PRIVATE_KEY_PATH=${JWT_PRIVATE_KEY_PATH:-/etc/ssl/certs/jwt_private.pem}
-      - JWT_PUBLIC_KEY_PATH=${JWT_PUBLIC_KEY_PATH:-/etc/ssl/certs/jwt_public.pem}
+      - JWT_PRIVATE_KEY_PATH=/etc/ssl/certs/jwt_private.pem
+      - JWT_PUBLIC_KEY_PATH=/etc/ssl/certs/jwt_public.pem
       - AUTH_INTROSPECTION_SECRET=${AUTH_INTROSPECTION_SECRET}
       - ALLOW_LEGACY_AGENT_AUTH=${ALLOW_LEGACY_AGENT_AUTH:-false}
       - AGENT_API_KEY=${AGENT_API_KEY}
@@ -116,7 +116,7 @@ services:
       - DB_NAME=${DB_NAME}
       - DB_USER=${DB_APP_USER:-onoffdash_app}
       - DB_PASSWORD=${DB_APP_PASSWORD}
-      - JWT_PUBLIC_KEY_PATH=${JWT_PUBLIC_KEY_PATH:-/etc/ssl/certs/jwt_public.pem}
+      - JWT_PUBLIC_KEY_PATH=/etc/ssl/certs/jwt_public.pem
       - AUTH_INTROSPECTION_URL=${AUTH_INTROSPECTION_URL:-http://backend:3001/api/auth/introspect}
       - AUTH_INTROSPECTION_SECRET=${AUTH_INTROSPECTION_SECRET}
     healthcheck:
@@ -151,7 +151,7 @@ services:
       - DB_NAME=${DB_NAME}
       - DB_USER=${DB_APP_USER:-onoffdash_app}
       - DB_PASSWORD=${DB_APP_PASSWORD}
-      - JWT_PUBLIC_KEY_PATH=${JWT_PUBLIC_KEY_PATH:-/etc/ssl/certs/jwt_public.pem}
+      - JWT_PUBLIC_KEY_PATH=/etc/ssl/certs/jwt_public.pem
       - AUTH_INTROSPECTION_URL=${AUTH_INTROSPECTION_URL:-http://backend:3001/api/auth/introspect}
       - AUTH_INTROSPECTION_SECRET=${AUTH_INTROSPECTION_SECRET}
     healthcheck:
