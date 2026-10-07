@@ -9,6 +9,8 @@ const OID_SUPPLY_DESCRIPTION = "1.3.6.1.2.1.43.11.1.1.6";
 const OID_SUPPLY_TYPE = "1.3.6.1.2.1.43.11.1.1.5";
 const OID_SUPPLY_MAX_CAPACITY = "1.3.6.1.2.1.43.11.1.1.8";
 const OID_SUPPLY_CURRENT_LEVEL = "1.3.6.1.2.1.43.11.1.1.9";
+const OID_SUPPLY_COLORANT_INDEX = "1.3.6.1.2.1.43.11.1.1.3";
+const OID_MARKER_COLORANT_VALUE = "1.3.6.1.2.1.43.12.1.1.4";
 
 // Model OID candidates
 const OID_PRINTER_MODEL = "1.3.6.1.2.1.25.3.2.1.3.1"; // hrDeviceDescr.1
@@ -28,10 +30,13 @@ const OID_PAGE_COUNT_ALT2 = "1.3.6.1.2.1.43.10.2.1.4.1"; // Alternative MarkerLi
 /**
  * Resolves toner / supply color name and filters out non-toner supplies
  * (waste containers, drum units, fusers, transfer belts).
+ * Supports RFC 3805 colorant values and printer cartridge naming patterns
+ * (Kyocera TK-*, Canon CRG-*, Brother TN-*, HP, Xerox, Ricoh).
  */
-function resolveSupplyColor(desc, supplyType, index, totalSupplies) {
+function resolveSupplyColor(desc, supplyType, index, totalConsumableSupplies, colorantValue = null) {
     const raw = (desc || '').toString().trim();
     const lower = raw.toLowerCase();
+    const colorantStr = (colorantValue || '').toString().trim().toLowerCase();
 
     // 1. Exclude non-toner supplies (waste toner, drum units, fusers, maintenance boxes)
     // RFC 3805 prtMarkerSuppliesType: 4=wasteToner, 8=wasteInk, 9=opc, 15=fuser, 16=cleaningContainer, 17=fuserCleaningPad, 18=transferUnit
@@ -48,28 +53,73 @@ function resolveSupplyColor(desc, supplyType, index, totalSupplies) {
         return null;
     }
 
-    // 2. Identify color
-    if (lower.includes('black') || lower.includes('siyah') || lower.includes('schwarz') || lower.includes('noir') || /\b(k|bk)\b/i.test(raw)) {
-        return 'Black';
+    // 2. Check RFC 3805 prtMarkerColorantValue if available
+    if (colorantStr) {
+        if (colorantStr.includes('black') || colorantStr === 'k' || colorantStr === 'bk') return 'Black';
+        if (colorantStr.includes('cyan') || colorantStr === 'c') return 'Cyan';
+        if (colorantStr.includes('magenta') || colorantStr === 'm') return 'Magenta';
+        if (colorantStr.includes('yellow') || colorantStr === 'y') return 'Yellow';
     }
-    if (lower.includes('cyan') || lower.includes('mavi') || lower.includes('gök') || /\b(c)\b/i.test(raw)) {
-        return 'Cyan';
-    }
-    if (lower.includes('magenta') || lower.includes('macenta') || lower.includes('kırmızı') || lower.includes('kirmizi') || lower.includes('pembe') || /\b(m)\b/i.test(raw)) {
+
+    // 3. Check explicit full color names (Turkish, English, German, French)
+    if (lower.includes('magenta') || lower.includes('macenta') || lower.includes('kırmızı') || lower.includes('kirmizi') || lower.includes('pembe')) {
         return 'Magenta';
     }
-    if (lower.includes('yellow') || lower.includes('sarı') || lower.includes('sari') || lower.includes('gelb') || /\b(y)\b/i.test(raw)) {
+    if (lower.includes('cyan') || lower.includes('mavi') || lower.includes('gök') || lower.includes('cam')) {
+        return 'Cyan';
+    }
+    if (lower.includes('yellow') || lower.includes('sarı') || lower.includes('sari') || lower.includes('gelb') || lower.includes('jaune')) {
         return 'Yellow';
     }
-
-    // 3. Monochrome printer handling: If only 1 supply in the printer, it's Black
-    if (totalSupplies === 1) {
+    if (lower.includes('black') || lower.includes('siyah') || lower.includes('schwarz') || lower.includes('noir')) {
         return 'Black';
     }
 
-    // 4. Cartridge names without explicit color word
+    // 4. Monochrome printer handling: If only 1 consumable supply exists in the printer, it's Black
+    if (totalConsumableSupplies === 1) {
+        return 'Black';
+    }
+
+    // 5. Check model prefixes, suffixes, and cartridge codes for color printers
+    const isBlack = /(?:tk|crg|tn|clt|cf|ce|cb|cc|q)[-_0-9]+k\b/i.test(raw) ||
+        /[_-](?:k|bk)$/i.test(raw) ||
+        /\((?:k|bk)\)/i.test(raw) ||
+        /\[(?:k|bk)\]/i.test(raw) ||
+        /(?:^|\s)(?:k|bk)(?:$|\s|:)/i.test(raw);
+    if (isBlack) return 'Black';
+
+    const isCyan = /(?:tk|crg|tn|clt|cf|ce|cb|cc|q)[-_0-9]+c\b/i.test(raw) ||
+        /[_-]c$/i.test(raw) ||
+        /\(c\)/i.test(raw) ||
+        /\[c\]/i.test(raw) ||
+        /(?:^|\s)c(?:$|\s|:)/i.test(raw);
+    if (isCyan) return 'Cyan';
+
+    const isMagenta = /(?:tk|crg|tn|clt|cf|ce|cb|cc|q)[-_0-9]+m\b/i.test(raw) ||
+        /[_-]m$/i.test(raw) ||
+        /\(m\)/i.test(raw) ||
+        /\[m\]/i.test(raw) ||
+        /(?:^|\s)m(?:$|\s|:)/i.test(raw);
+    if (isMagenta) return 'Magenta';
+
+    const isYellow = /(?:tk|crg|tn|clt|cf|ce|cb|cc|q)[-_0-9]+y\b/i.test(raw) ||
+        /[_-]y$/i.test(raw) ||
+        /\(y\)/i.test(raw) ||
+        /\[y\]/i.test(raw) ||
+        /(?:^|\s)y(?:$|\s|:)/i.test(raw);
+    if (isYellow) return 'Yellow';
+
+    // 6. Standard 4-color laser printer fallback if supplies have generic numbering
+    if (totalConsumableSupplies === 4 && (!raw || lower.includes('supply') || lower.includes('toner') || lower.includes('cartridge'))) {
+        const cmykOrder = ['Black', 'Cyan', 'Magenta', 'Yellow'];
+        if (index >= 1 && index <= 4) {
+            return cmykOrder[index - 1];
+        }
+    }
+
+    // 7. Retain cleaned cartridge name or supply label
     if (lower.includes('toner') || lower.includes('cartridge') || lower.includes('kartuş') || lower.includes('kartus')) {
-        return raw.length > 20 ? `Toner ${index}` : raw;
+        return raw.length > 24 ? `Toner ${index}` : raw;
     }
 
     return raw || `Supply ${index}`;
@@ -191,9 +241,23 @@ class PrinterMonitorService {
                     model = webData.model || model;
                     toners = webData.toners || toners;
                     if (webData.pageCount) pageCount = webData.pageCount;
-                } catch (webErr) {
+                } catch (_webErr) {
                     errorMessage = `Connection failed (SNMP & Web: ${err.message})`;
                     isOnline = false;
+                }
+            }
+
+            // Fallback to Web Scraper if SNMP succeeded but found no toner supplies
+            if (isOnline && toners.length === 0) {
+                try {
+                    const webData = await this.getWebScraperInfo(printer.ip_address);
+                    if (webData && Array.isArray(webData.toners) && webData.toners.length > 0) {
+                        toners = webData.toners;
+                    }
+                    if (!model && webData.model) model = webData.model;
+                    if (!pageCount && webData.pageCount) pageCount = webData.pageCount;
+                } catch (_) {
+                    // Non-fatal if web status page does not provide toners
                 }
             }
 
@@ -374,38 +438,83 @@ class PrinterMonitorService {
                 toners: []
             };
 
-            const walkSubtreeMap = (baseOid) => {
+            const walkSubtreeMap = (baseOid, timeoutMs = 4000) => {
                 return new Promise((resWalk) => {
                     const map = {};
-                    session.subtree(baseOid, 20, (varbinds) => {
-                        for (let i = 0; i < varbinds.length; i++) {
-                            const vb = varbinds[i];
-                            if (!snmp.isVarbindError(vb)) {
-                                let val = vb.value;
-                                if (Buffer.isBuffer(val)) val = val.toString('utf8');
-                                const suffix = vb.oid.startsWith(baseOid + '.')
-                                    ? vb.oid.slice(baseOid.length + 1)
-                                    : vb.oid;
-                                map[suffix] = val;
-                            }
+                    let finished = false;
+                    const timer = setTimeout(() => {
+                        if (!finished) {
+                            finished = true;
+                            resWalk(map);
                         }
-                    }, () => {
-                        resWalk(map);
-                    });
+                    }, timeoutMs);
+
+                    try {
+                        session.subtree(baseOid, 20, (varbinds) => {
+                            if (finished) return true;
+                            for (let i = 0; i < varbinds.length; i++) {
+                                const vb = varbinds[i];
+                                if (!snmp.isVarbindError(vb)) {
+                                    let val = vb.value;
+                                    if (Buffer.isBuffer(val)) {
+                                        val = val.toString('utf8').replace(/\0/g, '').trim();
+                                    }
+                                    const suffix = vb.oid.startsWith(baseOid + '.')
+                                        ? vb.oid.slice(baseOid.length + 1)
+                                        : vb.oid;
+                                    map[suffix] = val;
+                                }
+                            }
+                        }, () => {
+                            if (!finished) {
+                                finished = true;
+                                clearTimeout(timer);
+                                resWalk(map);
+                            }
+                        });
+                    } catch (_) {
+                        if (!finished) {
+                            finished = true;
+                            clearTimeout(timer);
+                            resWalk(map);
+                        }
+                    }
                 });
             };
 
-            const getSnmpValue = (oid) => {
+            const getSnmpValue = (oid, timeoutMs = 2500) => {
                 return new Promise((resGet) => {
-                    session.get([oid], (error, varbinds) => {
-                        if (error || !varbinds || !varbinds[0] || snmp.isVarbindError(varbinds[0])) {
+                    let finished = false;
+                    const timer = setTimeout(() => {
+                        if (!finished) {
+                            finished = true;
                             resGet(null);
-                        } else {
-                            let val = varbinds[0].value;
-                            if (Buffer.isBuffer(val)) val = val.toString('utf8');
-                            resGet(val);
                         }
-                    });
+                    }, timeoutMs);
+
+                    try {
+                        session.get([oid], (error, varbinds) => {
+                            if (!finished) {
+                                finished = true;
+                                clearTimeout(timer);
+                                if (error || !varbinds || !varbinds[0] || snmp.isVarbindError(varbinds[0])) {
+                                    resGet(null);
+                                } else {
+                                    let val = varbinds[0].value;
+                                    if (Buffer.isBuffer(val)) {
+                                        val = val.toString('utf8').replace(/\0/g, '').trim();
+                                    }
+                                    resGet(val);
+                                }
+                            }
+                        });
+                    } catch (_) {
+                        if (!finished) {
+                            finished = true;
+                            clearTimeout(timer);
+                            resGet(null);
+                        }
+                    }
                 });
             };
 
@@ -413,22 +522,30 @@ class PrinterMonitorService {
                 try {
                     let hasAnyResponse = false;
 
-                    // 1. Model Resolution (Try multiple standard OIDs without failing closed on model alone)
-                    let modelVal = await getSnmpValue(OID_PRINTER_MODEL);
-                    if (!modelVal) modelVal = await getSnmpValue(OID_SYS_DESCR);
-                    if (!modelVal) modelVal = await getSnmpValue(OID_PRINTER_NAME_MIB);
-                    if (!modelVal) modelVal = await getSnmpValue(OID_PRINTER_MODEL_ALT);
+                    // 1. Model Resolution (Concurrently query model candidates)
+                    const [model1, sysDescr, modelNameMib, model2] = await Promise.all([
+                        getSnmpValue(OID_PRINTER_MODEL),
+                        getSnmpValue(OID_SYS_DESCR),
+                        getSnmpValue(OID_PRINTER_NAME_MIB),
+                        getSnmpValue(OID_PRINTER_MODEL_ALT)
+                    ]);
 
-                    if (modelVal) {
+                    const resolvedModel = model1 || sysDescr || modelNameMib || model2;
+                    if (resolvedModel) {
                         hasAnyResponse = true;
-                        data.model = modelVal.toString().trim();
+                        data.model = resolvedModel.toString().trim();
                     }
 
                     // 2. Supply / Toner Information (RFC 3805 Printer MIB)
-                    const descMap = await walkSubtreeMap(OID_SUPPLY_DESCRIPTION);
-                    const maxCapMap = await walkSubtreeMap(OID_SUPPLY_MAX_CAPACITY);
-                    const levelMap = await walkSubtreeMap(OID_SUPPLY_CURRENT_LEVEL);
-                    const typeMap = await walkSubtreeMap(OID_SUPPLY_TYPE);
+                    // Concurrently fetch description, capacities, levels, types and colorant tables
+                    const [descMap, maxCapMap, levelMap, typeMap, colorantIndexMap, markerColorantMap] = await Promise.all([
+                        walkSubtreeMap(OID_SUPPLY_DESCRIPTION),
+                        walkSubtreeMap(OID_SUPPLY_MAX_CAPACITY),
+                        walkSubtreeMap(OID_SUPPLY_CURRENT_LEVEL),
+                        walkSubtreeMap(OID_SUPPLY_TYPE),
+                        walkSubtreeMap(OID_SUPPLY_COLORANT_INDEX),
+                        walkSubtreeMap(OID_MARKER_COLORANT_VALUE)
+                    ]);
 
                     const allSuffixes = Array.from(new Set([
                         ...Object.keys(descMap),
@@ -437,6 +554,17 @@ class PrinterMonitorService {
 
                     if (allSuffixes.length > 0) {
                         hasAnyResponse = true;
+                    }
+
+                    // Count consumable supplies first (excluding waste boxes, drums, fusers)
+                    let consumableCount = 0;
+                    for (const sfx of allSuffixes) {
+                        const rawType = typeMap[sfx] !== undefined ? parseInt(typeMap[sfx], 10) : null;
+                        const rawDesc = descMap[sfx] || '';
+                        const testColor = resolveSupplyColor(rawDesc, rawType, 1, 99);
+                        if (testColor !== null) {
+                            consumableCount++;
+                        }
                     }
 
                     const extractedSupplies = [];
@@ -448,8 +576,15 @@ class PrinterMonitorService {
                         const rawMax = maxCapMap[sfx] !== undefined ? parseInt(maxCapMap[sfx], 10) : 100;
                         const rawLevel = levelMap[sfx] !== undefined ? parseInt(levelMap[sfx], 10) : 0;
 
+                        // Check colorant value if indexed in marker table
+                        let colorantVal = null;
+                        const cIdx = colorantIndexMap[sfx];
+                        if (cIdx !== undefined && markerColorantMap) {
+                            colorantVal = markerColorantMap[cIdx] || markerColorantMap[`1.${cIdx}`] || null;
+                        }
+
                         // Identify supply color or type (filtering out waste boxes, drums, fusers)
-                        const colorName = resolveSupplyColor(rawDesc, rawType, i + 1, allSuffixes.length);
+                        const colorName = resolveSupplyColor(rawDesc, rawType, i + 1, consumableCount, colorantVal);
                         if (!colorName) {
                             continue;
                         }
@@ -469,10 +604,13 @@ class PrinterMonitorService {
                                 maxCap = curr;
                             } else {
                                 maxCap = 100;
-                                curr = Math.max(0, curr);
+                                curr = (curr < 0) ? 100 : Math.max(0, curr);
                             }
                         } else if (curr === -3) {
-                            // RFC 3805: -3 means some remaining (OK)
+                            // RFC 3805: -3 means some remaining (OK level)
+                            curr = maxCap;
+                        } else if (curr === -2 || curr === -1) {
+                            // -2 = unknown, -1 = other: sensor cannot measure, treat as OK/full
                             curr = maxCap;
                         } else if (curr < 0) {
                             // Unknown or empty
@@ -502,19 +640,22 @@ class PrinterMonitorService {
                     }
                     data.toners = uniqueToners;
 
-                    // 3. Page Count
-                    let pc = await getSnmpValue(OID_PAGE_COUNT);
-                    if (!pc) pc = await getSnmpValue(OID_PAGE_COUNT_ALT);
-                    if (!pc) pc = await getSnmpValue(OID_PAGE_COUNT_ALT2);
-                    if (pc) {
+                    // 3. Page Count (Concurrently query page count candidates)
+                    const [pc1, pc2, pc3, pStatus, pError] = await Promise.all([
+                        getSnmpValue(OID_PAGE_COUNT),
+                        getSnmpValue(OID_PAGE_COUNT_ALT),
+                        getSnmpValue(OID_PAGE_COUNT_ALT2),
+                        getSnmpValue(OID_PRINTER_STATUS),
+                        getSnmpValue(OID_PRINTER_ERROR)
+                    ]);
+
+                    const validPc = pc1 || pc2 || pc3;
+                    if (validPc) {
                         hasAnyResponse = true;
-                        data.pageCount = parseInt(pc, 10) || 0;
+                        data.pageCount = parseInt(validPc, 10) || 0;
                     }
 
                     // 4. Printer Status & Errors
-                    const pStatus = await getSnmpValue(OID_PRINTER_STATUS);
-                    const pError = await getSnmpValue(OID_PRINTER_ERROR);
-
                     if (pStatus || pError) {
                         hasAnyResponse = true;
                     }
@@ -544,7 +685,9 @@ class PrinterMonitorService {
 
                     resolve(data);
                 } catch (e) {
-                    session.close();
+                    if (session && typeof session.close === 'function') {
+                        try { session.close(); } catch (_) {}
+                    }
                     reject(e);
                 }
             })();
@@ -560,7 +703,7 @@ class PrinterMonitorService {
         };
 
         const axiosInstance = axios.create({
-            timeout: 5000,
+            timeout: 2500,
             maxRedirects: 5,
             headers: {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) OnOffDash-PrinterMonitor/2.0'
@@ -574,7 +717,14 @@ class PrinterMonitorService {
             `http://${ipAddress}/general/status.html`,
             `http://${ipAddress}/startwlm/HServer?searchJob=INFO`,
             `http://${ipAddress}/status.html`,
-            `http://${ipAddress}/home.htm`
+            `http://${ipAddress}/home.htm`,
+            `http://${ipAddress}/hp/device/this.LCDispatcher?nav=hp.Supplies`,
+            `http://${ipAddress}/sws/app/information/supplies/supplies.view`,
+            `http://${ipAddress}/wsetup.html`,
+            `http://${ipAddress}/main.html`,
+            `http://${ipAddress}/printer/status.html`,
+            `http://${ipAddress}/supplies.html`,
+            `http://${ipAddress}/status/supplies.html`
         ];
 
         let html = '';
@@ -603,16 +753,28 @@ class PrinterMonitorService {
             data.model = title.trim();
         }
 
+        // Page Count
+        const bodyText = $('body').text() || '';
+        const pcMatch = bodyText.match(/(?:page count|sayfa say[ıi]s[ıi]|total impressions|total pages)[\s:]*([0-9,.]+)/i);
+        if (pcMatch) {
+            const rawPc = pcMatch[1].replace(/[,.]/g, '');
+            const parsedPc = parseInt(rawPc, 10);
+            if (!isNaN(parsedPc) && parsedPc > 0) {
+                data.pageCount = parsedPc;
+            }
+        }
+
         // Toner Parse
-        const percentagePattern = /[%](\d+)|\b(\d+)[%]/i;
+        const percentagePattern = /[%]\s*(\d+)|\b(\d+)\s*[%]/i;
         const colorPatterns = {
-            'Black': ['black', 'siyah', 'k ', 'bk'],
-            'Cyan': ['cyan', 'cam', 'c '],
-            'Magenta': ['magenta', 'macenta', 'm '],
-            'Yellow': ['yellow', 'sarı', 'y ']
+            'Black': ['black', 'siyah', 'schwarz', 'noir', 'k ', 'bk', 'k/bk', '(k)', 'k:'],
+            'Cyan': ['cyan', 'cam', 'mavi', 'gök', 'c ', '(c)', 'c:'],
+            'Magenta': ['magenta', 'macenta', 'kırmızı', 'kirmizi', 'pembe', 'm ', '(m)', 'm:'],
+            'Yellow': ['yellow', 'sarı', 'sari', 'gelb', 'jaune', 'y ', '(y)', 'y:']
         };
 
         const foundToners = {};
+        const foundPercentages = [];
 
         // Helper to check color
         const matchColor = (text) => {
@@ -623,15 +785,19 @@ class PrinterMonitorService {
             return null;
         };
 
-        // Method 1: Search by td/div/span text content
-        $('td, div, span').each((i, el) => {
-            const text = $(el).text();
+        // Method 1: Search by text content
+        $('td, div, span, p').each((i, el) => {
+            const text = $(el).text().trim();
+            if (text.length > 120) return; // skip large parent containers
             const match = text.match(percentagePattern);
             if (match) {
                 const percentage = parseInt(match[1] || match[2], 10);
-                const c = matchColor(text);
-                if (c && !foundToners[c]) {
-                    foundToners[c] = percentage;
+                if (percentage >= 0 && percentage <= 100) {
+                    foundPercentages.push(percentage);
+                    const c = matchColor(text);
+                    if (c && !foundToners[c]) {
+                        foundToners[c] = percentage;
+                    }
                 }
             }
         });
@@ -639,16 +805,24 @@ class PrinterMonitorService {
         // Method 2: Search by style width (progress bars)
         $('[style]').each((i, el) => {
             const style = $(el).attr('style') || '';
-            const match = style.match(/width:\s*(\d+)%/i);
+            const match = style.match(/width:\s*(\d+(?:\.\d+)?)\s*%/i);
             if (match) {
-                const percentage = parseInt(match[1], 10);
-                const parentText = $(el).parent().text();
-                const c = matchColor(parentText);
-                if (c && !foundToners[c]) {
-                    foundToners[c] = percentage;
+                const percentage = Math.round(parseFloat(match[1]));
+                if (percentage >= 0 && percentage <= 100) {
+                    foundPercentages.push(percentage);
+                    const parentText = $(el).parent().text() || $(el).attr('title') || '';
+                    const c = matchColor(parentText);
+                    if (c && !foundToners[c]) {
+                        foundToners[c] = percentage;
+                    }
                 }
             }
         });
+
+        // Method 3: Monochrome single toner fallback
+        if (Object.keys(foundToners).length === 0 && foundPercentages.length > 0) {
+            foundToners['Black'] = foundPercentages[0];
+        }
 
         for (const [color, level] of Object.entries(foundToners)) {
             data.toners.push({
@@ -678,6 +852,16 @@ class PrinterMonitorService {
             
             const pStats = printersResult.rows[0];
 
+            const lowTonerThreshold = getLowTonerThreshold();
+            const lowTonerResult = await pool.query(`
+                SELECT COUNT(DISTINCT p.id) as count
+                FROM printers p
+                INNER JOIN printer_toners pt ON pt.printer_id = p.id
+                WHERE p.is_online = 1
+                  AND pt.max_capacity > 0
+                  AND (CAST(pt.level AS FLOAT) / CAST(pt.max_capacity AS FLOAT)) * 100 < $1
+            `, [lowTonerThreshold]);
+
             this.io.emit('dashboard:stats', {
                 devices: {
                     total: parseInt(devicesTotal.rows[0].count),
@@ -688,7 +872,8 @@ class PrinterMonitorService {
                 printers: {
                     total: parseInt(pStats.total || 0),
                     online: parseInt(pStats.online || 0),
-                    jam: parseInt(pStats.jam || 0)
+                    jam: parseInt(pStats.jam || 0),
+                    lowToner: parseInt(lowTonerResult.rows[0]?.count || 0)
                 },
                 lastScanTime: new Date().toISOString()
             });
@@ -697,5 +882,7 @@ class PrinterMonitorService {
         }
     }
 }
+
+PrinterMonitorService.resolveSupplyColor = resolveSupplyColor;
 
 module.exports = PrinterMonitorService;

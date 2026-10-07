@@ -447,11 +447,12 @@ router.post('/', requireRole('operator'), async (req, res) => {
             const client = await pool.connect();
             try {
                 await client.query('BEGIN TRANSACTION');
+                await client.query('DELETE FROM printer_toners WHERE printer_id = $1', [printer.id]);
                 for (const toner of toners) {
                     await client.query(
                         `INSERT INTO printer_toners (printer_id, color, level, max_capacity, pages_printed)
                          VALUES ($1, $2, $3, $4, $5)`,
-                        [printer.id, toner.color, toner.level || 0, toner.max_capacity || 100, toner.pages_printed || 0]
+                        [printer.id, toner.color, toner.level || 0, toner.max_capacity || toner.maxCapacity || 100, toner.pages_printed || 0]
                     );
                 }
                 await client.query('COMMIT TRANSACTION');
@@ -465,6 +466,14 @@ router.post('/', requireRole('operator'), async (req, res) => {
 
         const io = req.app.get('io');
         if (io) io.emit('printer:added', printer);
+
+        // Arka planda ilk SNMP/Web taramasını tetikle
+        const monitor = req.app.get('printerMonitorService');
+        if (monitor && typeof monitor.scanSinglePrinter === 'function') {
+            monitor.scanSinglePrinter(printer.id).catch(scanErr => {
+                console.warn(`Initial scan for printer ${printer.id} failed:`, scanErr.message);
+            });
+        }
 
         res.status(201).json(printer);
     } catch (err) {
@@ -539,7 +548,7 @@ router.put('/:id', requireRole('operator'), async (req, res) => {
                     await client.query(
                         `INSERT INTO printer_toners (printer_id, color, level, max_capacity, pages_printed)
                          VALUES ($1, $2, $3, $4, $5)`,
-                        [req.params.id, toner.color, toner.level || 0, toner.max_capacity || 100, toner.pages_printed || 0]
+                        [req.params.id, toner.color, toner.level || 0, toner.max_capacity || toner.maxCapacity || 100, toner.pages_printed || 0]
                     );
                 }
                 await client.query('COMMIT TRANSACTION');
@@ -621,7 +630,8 @@ router.post('/toners/stock', requireRole('operator'), async (req, res) => {
 router.put('/toners/stock/:model', requireRole('operator'), async (req, res) => {
     try {
         const { new_model, quantity } = req.body;
-        const modelParam = req.params.model;
+        const rawModel = req.params.model;
+        const modelParam = decodeURIComponent(rawModel).trim();
         const parsedQty = parseInt(quantity, 10) || 0;
 
         const result = await pool.query(
@@ -642,14 +652,16 @@ router.put('/toners/stock/:model', requireRole('operator'), async (req, res) => 
 // DELETE /api/printers/toners/stock/:model — Toner stok modelini sil
 router.delete('/toners/stock/:model', requireRole('admin'), async (req, res) => {
     try {
+        const rawModel = req.params.model;
+        const modelParam = decodeURIComponent(rawModel).trim();
         const result = await pool.query(
             `DELETE FROM toner_stock OUTPUT DELETED.* WHERE toner_model = $1`,
-            [req.params.model]
+            [modelParam]
         );
         if (result.rows.length === 0) {
             return res.status(404).json({ error: 'Toner model not found in stock' });
         }
-        res.json({ message: 'Toner model deleted', model: req.params.model });
+        res.json({ message: 'Toner model deleted', model: modelParam });
     } catch (err) {
         console.error('Error deleting toner stock:', err);
         res.status(500).json({ error: 'Failed to delete toner stock' });

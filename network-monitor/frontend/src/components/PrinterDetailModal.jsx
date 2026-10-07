@@ -18,7 +18,24 @@ function getRelativeTime(dateStr) {
   return `${Math.floor(diff / 86400)} gün önce`;
 }
 
-export default function PrinterDetailModal({ printer, onClose, onEdit, role }) {
+function getTonerDisplayMeta(colorStr) {
+  const c = (colorStr || '').toString().trim().toLowerCase();
+  if (c.includes('black') || c.includes('siyah') || c.includes('schwarz') || c.includes('noir') || c === 'k' || c === 'bk' || /(?:tk|crg|tn|cf)[-_0-9]+k\b/i.test(c) || c.endsWith('k')) {
+    return { label: 'K', baseColor: '#334155', name: 'Siyah' };
+  }
+  if (c.includes('cyan') || c.includes('mavi') || c.includes('gök') || c.includes('cam') || c === 'c' || c === 'cyn' || /(?:tk|crg|tn|cf)[-_0-9]+c\b/i.test(c) || c.endsWith('c')) {
+    return { label: 'C', baseColor: '#06b6d4', name: 'Mavi (Cyan)' };
+  }
+  if (c.includes('magenta') || c.includes('macenta') || c.includes('kırmızı') || c.includes('kirmizi') || c.includes('pembe') || c === 'm' || c === 'mag' || /(?:tk|crg|tn|cf)[-_0-9]+m\b/i.test(c) || c.endsWith('m')) {
+    return { label: 'M', baseColor: '#ec4899', name: 'Kırmızı (Magenta)' };
+  }
+  if (c.includes('yellow') || c.includes('sarı') || c.includes('sari') || c.includes('gelb') || c.includes('jaune') || c === 'y' || c === 'yel' || /(?:tk|crg|tn|cf)[-_0-9]+y\b/i.test(c) || c.endsWith('y')) {
+    return { label: 'Y', baseColor: '#eab308', name: 'Sarı (Yellow)' };
+  }
+  return { label: colorStr ? colorStr.substring(0, 2).toUpperCase() : 'T', baseColor: '#2563eb', name: colorStr || 'Toner' };
+}
+
+export default function PrinterDetailModal({ printer, onClose, onEdit, role, onRefresh }) {
   const [details, setDetails] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -42,6 +59,12 @@ export default function PrinterDetailModal({ printer, onClose, onEdit, role }) {
       });
   }, [printer?.id]);
 
+  useEffect(() => {
+    if (printer) {
+      setDetails(prev => ({ ...(prev || {}), ...printer }));
+    }
+  }, [printer]);
+
   const handleScan = async () => {
     if (!printer?.id || refreshing) return;
     setRefreshing(true);
@@ -53,6 +76,9 @@ export default function PrinterDetailModal({ printer, onClose, onEdit, role }) {
       if (data.printer) {
         setDetails(data.printer);
         setScanStatus({ type: 'success', text: 'Toner seviyeleri ve durum güncellendi.' });
+        if (typeof onRefresh === 'function') {
+          onRefresh();
+        }
       }
     } catch (err) {
       console.error('Scan error:', err);
@@ -226,25 +252,22 @@ export default function PrinterDetailModal({ printer, onClose, onEdit, role }) {
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                 {p.toners.filter(t => t && t.color).map((toner, idx) => {
-                  const percentage = Math.min(100, Math.max(0, (toner.level / (toner.max_capacity || 100)) * 100));
-                  let barColor = '#2563eb';
-                  const cLower = toner.color.toLowerCase();
+                  const maxCap = toner.max_capacity || toner.maxCapacity || 100;
+                  const percentage = Math.min(100, Math.max(0, (toner.level / maxCap) * 100));
+                  const meta = getTonerDisplayMeta(toner.color);
+                  let barColor = meta.baseColor;
                   if (percentage < 10) barColor = 'var(--status-offline)';
                   else if (percentage < 25) barColor = 'var(--status-warning)';
-                  else if (cLower.includes('black') || cLower.includes('siyah')) barColor = '#334155';
-                  else if (cLower.includes('cyan') || cLower.includes('mavi')) barColor = '#06b6d4';
-                  else if (cLower.includes('magenta') || cLower.includes('kırmızı')) barColor = '#ec4899';
-                  else if (cLower.includes('yellow') || cLower.includes('sarı')) barColor = '#eab308';
 
                   return (
                     <div key={idx} style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
                         <strong style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                           <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', backgroundColor: barColor }} />
-                          {toner.color}
+                          {toner.color} <span style={{ color: 'var(--text-muted)', fontWeight: 500 }}>({meta.name})</span>
                         </strong>
                         <span style={{ color: 'var(--text-secondary)' }}>
-                          {toner.level} / {toner.max_capacity || 100} (%{Math.round(percentage)})
+                          {toner.level} / {maxCap} (%{Math.round(percentage)})
                         </span>
                       </div>
                       <div style={{ height: '7px', width: '100%', backgroundColor: '#f1f5f9', borderRadius: '4px', overflow: 'hidden' }}>

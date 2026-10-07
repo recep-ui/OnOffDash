@@ -176,7 +176,7 @@ export default function TonerStockPanel({ role }) {
 
     try {
       if (editingStock) {
-        await fetchWithAuth(`/api/printers/toners/stock/${editingStock.id}`, {
+        await fetchWithAuth(`/api/printers/toners/stock/${encodeURIComponent(editingStock.toner_model)}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(stockForm)
@@ -204,7 +204,7 @@ export default function TonerStockPanel({ role }) {
       message: `"${item.toner_model}" model toner stok kaydını silmek istediğinize emin misiniz?`,
       onConfirm: async () => {
         try {
-          await fetchWithAuth(`/api/printers/toners/stock/${item.id}`, { method: 'DELETE' });
+          await fetchWithAuth(`/api/printers/toners/stock/${encodeURIComponent(item.toner_model)}`, { method: 'DELETE' });
           showToast('success', '🗑️ Silindi', 'Toner stoğu silindi.');
           fetchStock();
         } catch (err) {
@@ -378,7 +378,7 @@ export default function TonerStockPanel({ role }) {
                   {filteredStock.map(item => {
                     const isLow = (parseInt(item.quantity) || 0) <= 2;
                     return (
-                      <tr key={item.id}>
+                      <tr key={item.toner_model}>
                         <td><strong>{item.toner_model}</strong></td>
                         <td style={{ fontSize: '14px', fontWeight: 700, color: isLow ? 'var(--status-offline)' : 'var(--text-primary)' }}>
                           {item.quantity} Adet

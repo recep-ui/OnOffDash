@@ -21,6 +21,23 @@ import { useNotification } from './NotificationProvider';
 import PrinterDetailModal from './PrinterDetailModal';
 import { fetchWithAuth, downloadFileWithAuth } from '../services/api';
 
+function getTonerDisplayMeta(colorStr) {
+  const c = (colorStr || '').toString().trim().toLowerCase();
+  if (c.includes('black') || c.includes('siyah') || c.includes('schwarz') || c.includes('noir') || c === 'k' || c === 'bk' || /(?:tk|crg|tn|cf)[-_0-9]+k\b/i.test(c) || c.endsWith('k')) {
+    return { label: 'K', baseColor: '#334155', name: 'Siyah' };
+  }
+  if (c.includes('cyan') || c.includes('mavi') || c.includes('gök') || c.includes('cam') || c === 'c' || c === 'cyn' || /(?:tk|crg|tn|cf)[-_0-9]+c\b/i.test(c) || c.endsWith('c')) {
+    return { label: 'C', baseColor: '#06b6d4', name: 'Mavi (Cyan)' };
+  }
+  if (c.includes('magenta') || c.includes('macenta') || c.includes('kırmızı') || c.includes('kirmizi') || c.includes('pembe') || c === 'm' || c === 'mag' || /(?:tk|crg|tn|cf)[-_0-9]+m\b/i.test(c) || c.endsWith('m')) {
+    return { label: 'M', baseColor: '#ec4899', name: 'Kırmızı (Magenta)' };
+  }
+  if (c.includes('yellow') || c.includes('sarı') || c.includes('sari') || c.includes('gelb') || c.includes('jaune') || c === 'y' || c === 'yel' || /(?:tk|crg|tn|cf)[-_0-9]+y\b/i.test(c) || c.endsWith('y')) {
+    return { label: 'Y', baseColor: '#eab308', name: 'Sarı (Yellow)' };
+  }
+  return { label: colorStr ? colorStr.substring(0, 2).toUpperCase() : 'T', baseColor: '#2563eb', name: colorStr || 'Toner' };
+}
+
 function TonerBars({ toners = [] }) {
   if (!toners || toners.length === 0) {
     return <span style={{ color: 'var(--text-muted)', fontSize: '11.5px' }}>Toner bilgisi yok</span>;
@@ -34,20 +51,20 @@ function TonerBars({ toners = [] }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', minWidth: '130px' }}>
       {validToners.map((toner, idx) => {
-        const percentage = Math.min(100, Math.max(0, (toner.level / (toner.max_capacity || 100)) * 100));
-        let barColor = '#2563eb';
-        const cLower = toner.color.toLowerCase();
+        const maxCap = toner.max_capacity || toner.maxCapacity || 100;
+        const percentage = Math.min(100, Math.max(0, (toner.level / maxCap) * 100));
+        const meta = getTonerDisplayMeta(toner.color);
+        let barColor = meta.baseColor;
         if (percentage < 10) barColor = 'var(--status-offline)';
         else if (percentage < 25) barColor = 'var(--status-warning)';
-        else if (cLower.includes('black') || cLower.includes('siyah') || cLower === 'k') barColor = '#334155';
-        else if (cLower.includes('cyan') || cLower.includes('mavi') || cLower === 'c') barColor = '#06b6d4';
-        else if (cLower.includes('magenta') || cLower.includes('kırmızı') || cLower === 'm') barColor = '#ec4899';
-        else if (cLower.includes('yellow') || cLower.includes('sarı') || cLower === 'y') barColor = '#eab308';
 
         return (
           <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px' }}>
-            <span style={{ width: '12px', fontWeight: 700, color: 'var(--text-muted)' }}>
-              {toner.color.substring(0, 1).toUpperCase()}
+            <span
+              title={`${meta.name}: %${Math.round(percentage)} (${toner.level}/${maxCap})`}
+              style={{ width: '13px', fontWeight: 700, color: meta.baseColor, fontSize: '10.5px' }}
+            >
+              {meta.label}
             </span>
             <div style={{
               flex: 1,
@@ -423,6 +440,7 @@ export default function PrinterTable({
         <PrinterDetailModal
           printer={selectedPrinter}
           onClose={() => setSelectedPrinter(null)}
+          onEdit={onEdit}
           onRefresh={onRefresh}
           role={role}
         />
