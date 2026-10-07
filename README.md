@@ -7,36 +7,41 @@ OnOffDash V2 is a unified network, hardware, printer, and inventory management p
 ```
 OnOffDash_V2/
 ├── .github/
+│   ├── dependabot.yml             # Dependabot configuration (npm, pip, github-actions)
 │   └── workflows/
 │       └── ci.yml                 # Automated CI (audits, vitest, backend test, python test, docker)
 ├── ARCHITECTURE.md                # Definitive production system architecture & topology
 ├── SECURITY.md                    # Security architecture, controls, threat model & disclosure
-├── ROADMAP.md                     # Upcoming capabilities (SNMPv3, IPv6, HttpOnly cookies)
-├── CHANGELOG.md                   # Complete record of Phase 1 - Phase 5 improvements
+├── ROADMAP.md                     # Upcoming capabilities (SNMPv3, IPv6)
+├── CHANGELOG.md                   # Complete record of Phase 1 - Phase 5 & 2.3.0 improvements
 ├── AUDIT_REPORT.md                # Archived audit findings (all resolved)
 ├── SECURITY_MIGRATION.md          # Credential rotation and sanitization guide
 ├── PRODUCTION_CHECKLIST.md        # Pre-deployment production readiness verification
 └── network-monitor/               # Core Application
-    ├── backend/                   # Node.js / Express / Socket.IO / MSSQL API (102 tests across 14 suites)
+    ├── backend/                   # Node.js / Express / Socket.IO / MSSQL API (116 tests across 49 suites)
     ├── frontend/                  # React 19 / Vite Dashboard (23 Vitest component tests)
     ├── agent/                     # Windows Client Agent & Auto-Updater (12 tests)
     ├── services/
-    │   ├── pdf-service/           # FastAPI PDF Tools Microservice (9 tests)
-    │   └── file-service/          # FastAPI File & Image Tools Microservice (13 tests)
-    ├── docker-compose.yml         # Local HTTP development compose setup
+    │   ├── pdf-service/           # FastAPI PDF Tools Microservice (23 tests)
+    │   └── file-service/          # FastAPI File & Image Tools Microservice (29 tests)
+    ├── docker-compose.yml         # Local HTTP development compose setup (hardened runtime)
     ├── docker-compose.prod.yml    # Production HTTPS / TLS compose override
     └── docs/archive/              # Archived legacy planning and audit documents
 ```
 
 ## Quick Start (Docker)
 
-1. Setup environment variables:
+1. Setup environment variables and RSA keys:
    ```bash
    cd network-monitor
    cp .env.example .env
    cp backend/.env.example backend/.env
+   mkdir -p keys
+   openssl genrsa -out keys/jwt_private.pem 2048
+   openssl rsa -in keys/jwt_private.pem -pubout -out keys/jwt_public.pem
+   chmod 600 keys/jwt_private.pem && chmod 644 keys/jwt_public.pem
    ```
-2. Set secure values for `MSSQL_SA_PASSWORD`, `JWT_SECRET` (min 32 chars), and `AGENT_API_KEY` (min 32 chars).
+2. Set secure values for `MSSQL_SA_PASSWORD`, `AUTH_INTROSPECTION_SECRET` (min 32 chars), and agent per-device credentials.
 3. Start the containers:
    ```bash
    docker compose up -d --build

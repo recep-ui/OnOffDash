@@ -457,6 +457,37 @@ async function runMigrations(customPool = null) {
             await recordMigration('011_refresh_tokens_and_audit', 'Persistent HttpOnly refresh token sessions and audit logging');
         }
 
+        // --- 012: Security Hardening: Atomic Refresh Tokens & Unique Active Agent Credentials ---
+        if (!await isMigrationApplied('012_security_hardening')) {
+            await client.query(`
+                -- 1. Unique index on token_hash to prevent duplicate refresh tokens
+                IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'uq_user_refresh_tokens_hash')
+                BEGIN
+                    CREATE UNIQUE INDEX uq_user_refresh_tokens_hash ON user_refresh_tokens(token_hash);
+                END
+
+                -- 2. Add family_id to user_refresh_tokens for replay detection & family revocation
+                IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('user_refresh_tokens') AND name = 'family_id')
+                BEGIN
+                    ALTER TABLE user_refresh_tokens ADD family_id VARCHAR(64) NULL;
+                END
+
+                IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_user_refresh_tokens_family')
+                BEGIN
+                    CREATE INDEX idx_user_refresh_tokens_family ON user_refresh_tokens(family_id);
+                END
+
+                -- 3. Filtered unique index: enforce invariant of at most one active credential per device
+                IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'uq_active_agent_credential_per_device')
+                BEGIN
+                    CREATE UNIQUE INDEX uq_active_agent_credential_per_device
+                    ON agent_credentials(device_id)
+                    WHERE is_revoked = 0;
+                END
+            `);
+            await recordMigration('012_security_hardening', 'Atomic refresh token unique index, family tracking, and single active agent credential invariant');
+        }
+
         console.log('✅ All database schema migrations verified and up to date.');
     } catch (err) {
         console.error('❌ Migration error:', err.message);

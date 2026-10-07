@@ -114,8 +114,7 @@ function createWrappedPool(sqlConfig) {
                             rowCount: result.rowsAffected ? result.rowsAffected[0] : 0
                         };
                     } catch (error) {
-                        console.error('SQL Error on query:', mssqlText);
-                        console.error('With params:', maskParamsForLog(mssqlText, params));
+                        console.error('SQL Error on transaction query:', mssqlText, '| Param count:', params ? params.length : 0);
                         throw error;
                     }
                 },
@@ -147,8 +146,7 @@ function createWrappedPool(sqlConfig) {
                     rowCount: result.rowsAffected ? result.rowsAffected[0] : 0
                 };
             } catch (error) {
-                console.error('SQL Error on query:', mssqlText);
-                console.error('With params:', maskParamsForLog(mssqlText, params));
+                console.error('SQL Error on query:', mssqlText, '| Param count:', params ? params.length : 0);
                 throw error;
             }
         }
@@ -233,6 +231,7 @@ module.exports = {
     createWrappedPool,
     adminConfig,
     config,
+    maskParamsForLog,
     get poolPromise() {
         return getConnection();
     }

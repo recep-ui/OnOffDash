@@ -54,6 +54,15 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 echo "=== [2/6] Generating Clean Test Configuration (.env) ==="
+mkdir -p "${PROJECT_DIR}/keys"
+if [ ! -f "${PROJECT_DIR}/keys/jwt_private.pem" ] || [ ! -f "${PROJECT_DIR}/keys/jwt_public.pem" ]; then
+  echo "[*] Generating test 2048-bit RSA keypair in ${PROJECT_DIR}/keys..."
+  openssl genrsa -out "${PROJECT_DIR}/keys/jwt_private.pem" 2048
+  openssl rsa -in "${PROJECT_DIR}/keys/jwt_private.pem" -pubout -out "${PROJECT_DIR}/keys/jwt_public.pem"
+  chmod 644 "${PROJECT_DIR}/keys/jwt_private.pem"
+  chmod 644 "${PROJECT_DIR}/keys/jwt_public.pem"
+fi
+
 cat << 'EOF' > "${TEST_ENV_FILE}"
 HOST_PORT=8088
 ACCEPT_EULA=Y
@@ -70,6 +79,10 @@ BOOTSTRAP_ADMIN_PASSWORD=AdminCleanDeployPass2026!
 PING_INTERVAL_SECONDS=60
 HEARTBEAT_TIMEOUT_SECONDS=90
 RETENTION_DAYS=30
+JWT_PRIVATE_KEY_PATH=/etc/ssl/certs/jwt_private.pem
+JWT_PUBLIC_KEY_PATH=/etc/ssl/certs/jwt_public.pem
+AUTH_INTROSPECTION_SECRET=clean-deploy-introspection-secret-min-32-chars
+ALLOW_LEGACY_AGENT_AUTH=false
 JWT_SECRET=clean-deployment-verification-jwt-secret-min-32-chars-long
 AGENT_API_KEY=clean-deployment-verification-agent-api-key-32-chars
 CORS_ORIGINS=http://localhost:8088,http://localhost
@@ -83,13 +96,17 @@ echo "[+] Clean test environment generated at ${TEST_ENV_FILE}"
 
 echo "=== [3/6] Starting Fresh Docker Stack Build & Startup ==="
 ${DOCKER_CMD} compose --env-file "${TEST_ENV_FILE}" down -v --remove-orphans || true
-${DOCKER_CMD} compose --env-file "${TEST_ENV_FILE}" up -d --build
+if ! ${DOCKER_CMD} compose --env-file "${TEST_ENV_FILE}" up -d --build; then
+  echo "[-] ERROR: docker compose up failed. Dumping container logs:"
+  ${DOCKER_CMD} compose --env-file "${TEST_ENV_FILE}" logs --tail 100
+  exit 1
+fi
 
 echo "=== [4/6] Polling Database and db-init Service Completion ==="
 
 echo "[*] Waiting for MSSQL container (network_monitor_db) to report healthy..."
 MSSQL_READY=0
-for i in $(seq 1 30); do
+for i in $(seq 1 60); do
   STATUS=$(${DOCKER_CMD} inspect --format='{{json .State.Health.Status}}' network_monitor_db 2>/dev/null || echo '"unknown"')
   if [[ "$STATUS" == '"healthy"' ]]; then
     echo "[+] MSSQL is healthy! (${i}s)"
@@ -134,7 +151,7 @@ echo "=== [5/6] Polling Backend, Frontend, and Microservices Health ==="
 
 echo "[*] Waiting for backend (network_monitor_backend) to become healthy..."
 BACKEND_READY=0
-for i in $(seq 1 30); do
+for i in $(seq 1 45); do
   STATUS=$(${DOCKER_CMD} inspect --format='{{json .State.Health.Status}}' network_monitor_backend 2>/dev/null || echo '"unknown"')
   if [[ "$STATUS" == '"healthy"' ]]; then
     echo "[+] Backend container is healthy! (${i}s)"
@@ -150,24 +167,68 @@ if [ "$BACKEND_READY" -ne 1 ]; then
   exit 1
 fi
 
-echo "[*] Verifying HTTP endpoints via Nginx reverse proxy on port 8088..."
-HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8088/ || true)
-echo "[+] Frontend index response code: ${HTTP_CODE}"
-if [[ "$HTTP_CODE" != "200" ]]; then
-  echo "[-] WARNING: Frontend returned HTTP ${HTTP_CODE}"
-fi
+echo "[*] Waiting for Nginx reverse proxy on port 8088 to respond..."
+FRONTEND_READY=0
+for i in $(seq 1 30); do
+  HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8088/ || true)
+  if [[ "$HTTP_CODE" == "200" ]]; then
+    echo "[+] Frontend index responded HTTP 200! (${i}s)"
+    FRONTEND_READY=1
+    break
+  fi
+  sleep 1
+done
 
-BACKEND_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8088/api/health || true)
-echo "[+] Backend /api/health response code: ${BACKEND_CODE}"
-if [[ "$BACKEND_CODE" != "200" ]]; then
-  echo "[-] ERROR: Backend health check failed with HTTP ${BACKEND_CODE}"
+if [ "$FRONTEND_READY" -ne 1 ]; then
+  echo "[-] ERROR: Frontend on port 8088 failed to respond HTTP 200 (last code: ${HTTP_CODE})."
+  ${DOCKER_CMD} logs network_monitor_frontend || true
   exit 1
 fi
 
-PDF_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8088/api/pdf/health || true)
-echo "[+] PDF Service /api/pdf/health response code: ${PDF_CODE}"
+echo "[*] Verifying backend and microservice routes through Nginx..."
+BACKEND_CODE=""
+for i in $(seq 1 15); do
+  BACKEND_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8088/api/health || true)
+  if [[ "$BACKEND_CODE" == "200" ]]; then
+    echo "[+] Backend /api/health responded HTTP 200! (${i}s)"
+    break
+  fi
+  sleep 1
+done
 
-FILE_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8088/api/file-tools/health || true)
-echo "[+] File Service /api/file-tools/health response code: ${FILE_CODE}"
+if [[ "$BACKEND_CODE" != "200" ]]; then
+  echo "[-] ERROR: Backend health check failed with HTTP ${BACKEND_CODE}"
+  ${DOCKER_CMD} logs network_monitor_backend || true
+  ${DOCKER_CMD} logs network_monitor_frontend || true
+  exit 1
+fi
+
+PDF_CODE=""
+for i in $(seq 1 15); do
+  PDF_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8088/api/pdf/health || true)
+  if [[ "$PDF_CODE" == "200" ]]; then
+    echo "[+] PDF Service /api/pdf/health responded HTTP 200! (${i}s)"
+    break
+  fi
+  sleep 1
+done
+
+if [[ "$PDF_CODE" != "200" ]]; then
+  echo "[-] WARNING: PDF Service health check returned HTTP ${PDF_CODE}"
+fi
+
+FILE_CODE=""
+for i in $(seq 1 15); do
+  FILE_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8088/api/file-tools/health || true)
+  if [[ "$FILE_CODE" == "200" ]]; then
+    echo "[+] File Service /api/file-tools/health responded HTTP 200! (${i}s)"
+    break
+  fi
+  sleep 1
+done
+
+if [[ "$FILE_CODE" != "200" ]]; then
+  echo "[-] WARNING: File Service health check returned HTTP ${FILE_CODE}"
+fi
 
 echo "=== [6/6] All Verification Checks PASSED Successfully! ==="

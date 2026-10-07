@@ -46,10 +46,19 @@ async function initializeDatabase() {
 
     let masterPool;
     try {
-        console.log(`🔌 [DB-INIT] Connecting to master as "${saUser}" at ${dbHost}:${dbPort}...`);
-        masterPool = new sql.ConnectionPool(masterConfig);
-        await masterPool.connect();
-        console.log('✅ [DB-INIT] Connected to master database.');
+        for (let attempt = 1; attempt <= 15; attempt++) {
+            try {
+                console.log(`🔌 [DB-INIT] Connecting to master as "${saUser}" at ${dbHost}:${dbPort} (attempt ${attempt}/15)...`);
+                masterPool = new sql.ConnectionPool(masterConfig);
+                await masterPool.connect();
+                console.log('✅ [DB-INIT] Connected to master database.');
+                break;
+            } catch (connErr) {
+                if (attempt === 15) throw connErr;
+                console.log(`⏳ [DB-INIT] Master connection pending (${connErr.message}), retrying in 2s...`);
+                await new Promise(r => setTimeout(r, 2000));
+            }
+        }
 
         // 1. Create database if it does not exist
         const req = masterPool.request();
@@ -101,8 +110,24 @@ async function initializeDatabase() {
 
     let wrappedTargetPool;
     try {
-        console.log(`🔌 [DB-INIT] Connecting to [${dbName}] with DDL privileges for schema provisioning...`);
-        wrappedTargetPool = createWrappedPool(targetDbConfig);
+        for (let attempt = 1; attempt <= 15; attempt++) {
+            try {
+                console.log(`🔌 [DB-INIT] Connecting to [${dbName}] with DDL privileges for schema provisioning (attempt ${attempt}/15)...`);
+                wrappedTargetPool = createWrappedPool(targetDbConfig);
+                const testRaw = await wrappedTargetPool.getPool();
+                await testRaw.request().query('SELECT 1');
+                console.log(`✅ [DB-INIT] Connected to [${dbName}].`);
+                break;
+            } catch (connErr) {
+                if (attempt === 15) throw connErr;
+                console.log(`⏳ [DB-INIT] Target DB connection pending (${connErr.message}), retrying in 2s...`);
+                if (wrappedTargetPool) {
+                    try { await wrappedTargetPool.close(); } catch (_) {}
+                    wrappedTargetPool = null;
+                }
+                await new Promise(r => setTimeout(r, 2000));
+            }
+        }
 
         // 3. Run schema migrations
         console.log('🚀 [DB-INIT] Running schema migrations...');

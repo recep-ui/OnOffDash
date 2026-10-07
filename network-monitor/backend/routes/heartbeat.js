@@ -25,6 +25,8 @@ router.post('/', authenticateAgent, async (req, res) => {
             uptime_seconds
         } = req.body;
 
+        let targetDeviceId = null;
+
         // Per-device kimlik doğrulama yapıldıysa anahtarın bağlı olduğu cihaz doğrulanmalıdır
         if (req.authenticatedDeviceId) {
             const boundDevRes = await pool.query('SELECT id, ip_address FROM devices WHERE id = $1', [req.authenticatedDeviceId]);
@@ -39,36 +41,51 @@ router.post('/', authenticateAgent, async (req, res) => {
                     error: 'Yetkili ajan başka bir cihaz adına telemetri bildiremez.' 
                 });
             }
+            targetDeviceId = boundDevice.id;
+        } else {
+            // Legacy authentication path (requires ALLOW_LEGACY_AGENT_AUTH=true)
+            // MUST NEVER implicitly create new devices or claim arbitrary IPs
+            const existingRes = await pool.query('SELECT id FROM devices WHERE ip_address = $1', [ip_address.trim()]);
+            if (existingRes.rows.length === 0) {
+                return res.status(403).json({ 
+                    error: 'Eski kimlik doğrulama ile yeni cihaz kaydı oluşturulamaz. Cihazı sisteme kaydediniz.' 
+                });
+            }
+            targetDeviceId = existingRes.rows[0].id;
+
+            // Security check: Devices with enrolled per-device credentials cannot be updated via legacy shared key
+            const enrolledCreds = await pool.query(
+                'SELECT COUNT(*) as cred_count FROM agent_credentials WHERE device_id = $1 AND is_revoked = 0',
+                [targetDeviceId]
+            );
+            const count = parseInt(enrolledCreds.rows[0]?.cred_count || 0, 10);
+            if (count > 0) {
+                return res.status(403).json({
+                    error: 'Bu cihaz için cihaza özel kimlik doğrulama tanımlıdır. Eski paylaşımlı anahtarla güncellenemez.'
+                });
+            }
         }
 
         // 1. Mevcut agent durumunu kontrol et (agent_status geçişinde event yaymak için)
-        const existingRes = await pool.query('SELECT id, status, agent_status FROM devices WHERE ip_address = $1', [ip_address]);
+        const existingRes = await pool.query('SELECT id, status, agent_status FROM devices WHERE id = $1', [targetDeviceId]);
         const previousAgentStatus = existingRes.rows.length > 0 ? (existingRes.rows[0].agent_status || 'offline') : 'offline';
         const isAgentTransition = previousAgentStatus !== 'online';
 
-        // 2. Cihazı bul veya oluştur (upsert)
-        // NOT: Heartbeat yalnızca agent_status'u yönetir. Ağ erişilebilirliği (status) PingService sorumluluğundadır.
-        // Yeni keşfedilen cihazlarda varsayılan ağ durumu 'offline' atanır.
+        // 2. Cihazı güncelle (asla bilinmeyen/yetkisiz cihaz oluşturulmaz)
         const deviceResult = await pool.query(
-            `MERGE INTO devices AS target
-             USING (VALUES ($1, $2, $3, $4, $5)) AS source (hostname, ip_address, mac_address, os_name, username)
-             ON target.ip_address = source.ip_address
-             WHEN MATCHED THEN
-                 UPDATE SET
-                     hostname = source.hostname,
-                     mac_address = COALESCE(source.mac_address, target.mac_address),
-                     os_name = COALESCE(NULLIF(source.os_name, ''), target.os_name),
-                     username = COALESCE(NULLIF(source.username, ''), target.username),
-                     agent_installed = 1,
-                     agent_status = 'online',
-                     last_heartbeat_at = GETDATE(),
-                     last_seen = GETDATE(),
-                     updated_at = GETDATE()
-             WHEN NOT MATCHED THEN
-                 INSERT (hostname, ip_address, mac_address, os_name, username, agent_installed, agent_status, status, last_heartbeat_at, last_seen, updated_at)
-                 VALUES (source.hostname, source.ip_address, source.mac_address, source.os_name, source.username, 1, 'online', 'offline', GETDATE(), GETDATE(), GETDATE())
-             OUTPUT INSERTED.*;`,
-            [hostname, ip_address, mac_address || null, os_name || '', username || '']
+            `UPDATE devices SET
+                hostname = $1,
+                mac_address = COALESCE($2, mac_address),
+                os_name = COALESCE(NULLIF($3, ''), os_name),
+                username = COALESCE(NULLIF($4, ''), username),
+                agent_installed = 1,
+                agent_status = 'online',
+                last_heartbeat_at = GETDATE(),
+                last_seen = GETDATE(),
+                updated_at = GETDATE()
+             OUTPUT INSERTED.*
+             WHERE id = $5`,
+            [hostname, mac_address || null, os_name || '', username || '', targetDeviceId]
         );
 
         const device = deviceResult.rows[0];

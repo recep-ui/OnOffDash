@@ -2,21 +2,60 @@ import os
 import base64
 import fitz  # PyMuPDF
 from pypdf import PdfReader, PdfWriter
+from pypdf.errors import PdfReadError
 from app.utils.file_utils import OUTPUT_DIR, generate_unique_filename
 
 MAX_PDF_PAGES = int(os.getenv("MAX_PDF_PAGES", "500"))
+MAX_PREVIEW_PAGES = int(os.getenv("MAX_PREVIEW_PAGES", "50"))
+MAX_PAGE_DIM = 4000
+MAX_PAGE_PIXELS = 16_000_000
+
+def _safe_open_fitz(file_path: str):
+    """Safely opens a PDF document with PyMuPDF, catching corrupted or encrypted files."""
+    if not os.path.exists(file_path):
+        raise ValueError(f"File not found: {os.path.basename(file_path)}")
+    try:
+        doc = fitz.open(file_path)
+        if doc.is_encrypted:
+            doc.close()
+            raise ValueError("Encrypted or password-protected PDF files are not supported.")
+        return doc
+    except ValueError:
+        raise
+    except Exception as e:
+        raise ValueError(f"Invalid or corrupted PDF file: {str(e)}")
+
+def _safe_open_pypdf(file_path: str):
+    """Safely opens a PDF document with pypdf, catching corrupted or encrypted files."""
+    if not os.path.exists(file_path):
+        raise ValueError(f"File not found: {os.path.basename(file_path)}")
+    try:
+        reader = PdfReader(file_path)
+        if reader.is_encrypted:
+            raise ValueError("Encrypted or password-protected PDF files are not supported.")
+        return reader
+    except ValueError:
+        raise
+    except Exception as e:
+        raise ValueError(f"Invalid or corrupted PDF file: {str(e)}")
 
 def get_pdf_previews(file_path: str) -> list[str]:
     """
     Renders PDF pages to low-resolution JPEG images and returns them as Base64 data URLs.
+    Enforces page count and page dimension bounds to prevent resource exhaustion.
     """
-    if not os.path.exists(file_path):
-        return []
-    
-    doc = fitz.open(file_path)
+    doc = _safe_open_fitz(file_path)
     previews = []
     try:
+        page_count = len(doc)
+        if page_count > MAX_PREVIEW_PAGES:
+            raise ValueError(f"Preview is limited to documents with at most {MAX_PREVIEW_PAGES} pages (document has {page_count} pages).")
+
         for page in doc:
+            rect = page.rect
+            if rect.width > MAX_PAGE_DIM or rect.height > MAX_PAGE_DIM or (rect.width * rect.height) > MAX_PAGE_PIXELS:
+                raise ValueError(f"Page dimensions ({int(rect.width)}x{int(rect.height)}) exceed safe rendering bounds.")
+
             # Render page to image at 72 DPI for fast thumbnail loading
             pix = page.get_pixmap(dpi=72)
             img_data = pix.tobytes("jpeg")
@@ -34,13 +73,12 @@ def merge_pdfs(file_paths: list[str], user_id = None) -> str:
     writer = PdfWriter()
     total_pages = 0
     for path in file_paths:
-        if os.path.exists(path):
-            reader = PdfReader(path)
-            total_pages += len(reader.pages)
-            if total_pages > MAX_PDF_PAGES:
-                raise ValueError(f"Total page count ({total_pages}) exceeds maximum allowed limit of {MAX_PDF_PAGES}.")
-            for page in reader.pages:
-                writer.add_page(page)
+        reader = _safe_open_pypdf(path)
+        total_pages += len(reader.pages)
+        if total_pages > MAX_PDF_PAGES:
+            raise ValueError(f"Total page count ({total_pages}) exceeds maximum allowed limit of {MAX_PDF_PAGES}.")
+        for page in reader.pages:
+            writer.add_page(page)
                 
     out_name = generate_unique_filename("pdf", user_id=user_id)
     out_path = os.path.join(OUTPUT_DIR, out_name)
@@ -55,7 +93,7 @@ def split_pdf(file_path: str, range_str: str, user_id = None) -> str:
     Splits a PDF by extracting specific pages or page ranges (e.g. '1-3', '5,7', '2-5, 8')
     and returns the merged result of those extracted pages.
     """
-    reader = PdfReader(file_path)
+    reader = _safe_open_pypdf(file_path)
     total_pages = len(reader.pages)
     if total_pages > MAX_PDF_PAGES:
         raise ValueError(f"PDF page count ({total_pages}) exceeds maximum allowed limit of {MAX_PDF_PAGES}.")
@@ -115,7 +153,7 @@ def reorder_rotate_delete_pdf(file_path: str, page_configs: list[dict], user_id 
     page_configs format: [{"index": int, "rotation": int}]
     Only pages present in page_configs are kept. Index is 0-indexed.
     """
-    doc = fitz.open(file_path)
+    doc = _safe_open_fitz(file_path)
     if len(doc) > MAX_PDF_PAGES:
         doc.close()
         raise ValueError(f"PDF page count ({len(doc)}) exceeds maximum allowed limit of {MAX_PDF_PAGES}.")
@@ -126,12 +164,15 @@ def reorder_rotate_delete_pdf(file_path: str, page_configs: list[dict], user_id 
             idx = cfg.get("index")
             rotation = cfg.get("rotation", 0)
             
-            if 0 <= idx < len(doc):
+            if idx is not None and 0 <= idx < len(doc):
                 new_doc.insert_pdf(doc, from_page=idx, to_page=idx)
                 if rotation != 0:
                     new_page = new_doc[-1]
                     new_page.set_rotation((new_page.rotation + rotation) % 360)
         
+        if len(new_doc) == 0:
+            raise ValueError("No valid pages selected for output.")
+
         out_name = generate_unique_filename("pdf", user_id=user_id)
         out_path = os.path.join(OUTPUT_DIR, out_name)
         new_doc.save(out_path, garbage=4, deflate=True)
@@ -145,7 +186,7 @@ def compress_pdf(file_path: str, quality: str = "medium", user_id = None) -> str
     """
     Compresses PDF using PyMuPDF optimizations.
     """
-    doc = fitz.open(file_path)
+    doc = _safe_open_fitz(file_path)
     if len(doc) > MAX_PDF_PAGES:
         doc.close()
         raise ValueError(f"PDF page count ({len(doc)}) exceeds maximum allowed limit of {MAX_PDF_PAGES}.")
@@ -169,7 +210,14 @@ def add_watermark(file_path: str, text: str, color_hex: str = "#FF0000", opacity
     """
     Inserts a semi-transparent text watermark onto all pages of the PDF.
     """
-    doc = fitz.open(file_path)
+    if not text or not str(text).strip():
+        raise ValueError("Watermark text cannot be empty.")
+    if not (0.0 <= opacity <= 1.0):
+        raise ValueError("Opacity must be between 0.0 and 1.0.")
+    if font_size < 1 or font_size > 200:
+        raise ValueError("Font size must be between 1 and 200.")
+
+    doc = _safe_open_fitz(file_path)
     if len(doc) > MAX_PDF_PAGES:
         doc.close()
         raise ValueError(f"PDF page count ({len(doc)}) exceeds maximum allowed limit of {MAX_PDF_PAGES}.")

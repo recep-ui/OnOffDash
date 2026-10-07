@@ -1,7 +1,16 @@
 import os
 import uuid
 import shutil
-from fastapi import HTTPException, UploadFile
+try:
+    from fastapi import HTTPException, UploadFile
+except ImportError:
+    class HTTPException(Exception):
+        def __init__(self, status_code=500, detail=""):
+            self.status_code = status_code
+            self.detail = detail
+            super().__init__(f"{status_code}: {detail}")
+    class UploadFile:
+        pass
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 TEMP_DIR = os.getenv("TEMP_DIR", "/storage/pdf-temp")

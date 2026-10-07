@@ -70,11 +70,24 @@ async def download_file_endpoint(file_id: str, user: dict = Depends(require_auth
     """
     Serves generated output files securely. Prevents path traversal and enforces ownership.
     """
-    safe_name = os.path.basename(file_id)
-    file_path = os.path.join(OUTPUT_DIR, safe_name)
-    
-    if not os.path.exists(file_path):
+    import re
+    from pathlib import Path
+
+    if not re.match(r"^(u\d+_)?[0-9a-fA-F\-]{8,64}\.[a-zA-Z0-9]{1,10}$", file_id):
+        raise HTTPException(status_code=400, detail="Geçersiz dosya yolu.")
+
+    try:
+        base_dir = Path(OUTPUT_DIR).resolve()
+        available_files = {f.name: f for f in base_dir.iterdir() if f.is_file()}
+    except Exception:
+        available_files = {}
+
+    if file_id not in available_files:
         raise HTTPException(status_code=404, detail="Dosya bulunamadı veya süresi doldu.")
+
+    target_file = available_files[file_id]
+    file_path = str(target_file.resolve())
+    safe_name = target_file.name
         
     user_id = user.get("id")
     role = user.get("role", "")

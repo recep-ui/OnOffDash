@@ -16,7 +16,8 @@ const {
     setUserSession, 
     invalidateUserSessions, 
     markUserDeleted,
-    verifyAccessToken 
+    verifyAccessToken,
+    signAccessToken
 } = require('../middleware/auth');
 const { parseCidr, ipToLong, longToIp } = require('../utils/ipamUtils');
 
@@ -204,6 +205,22 @@ describe('Real Production Route Integration Test Suite', () => {
                 }
             }
 
+            if (upper.includes('UPDATE DEVICES SET')) {
+                const id = parseInt(params[4], 10);
+                const existing = testDevices.find(d => d.id === id);
+                if (existing) {
+                    existing.hostname = params[0];
+                    if (params[1]) existing.mac_address = params[1];
+                    if (params[2]) existing.os_name = params[2];
+                    if (params[3]) existing.username = params[3];
+                    existing.agent_installed = 1;
+                    existing.agent_status = 'online';
+                    existing.last_heartbeat_at = new Date();
+                    return { rows: [existing], rowCount: 1 };
+                }
+                return { rows: [], rowCount: 0 };
+            }
+
             // 4. Agent credentials
             if (upper.includes('FROM AGENT_CREDENTIALS WHERE KEY_ID =')) {
                 const keyId = params[0];
@@ -372,9 +389,8 @@ describe('Real Production Route Integration Test Suite', () => {
         });
 
         it('should reject expired JWT access token', async () => {
-            const expiredToken = jwt.sign(
+            const expiredToken = signAccessToken(
                 { id: 1, username: 'admin', role: 'admin', token_version: 1 },
-                process.env.JWT_SECRET,
                 { expiresIn: '-1s' }
             );
 
@@ -387,9 +403,8 @@ describe('Real Production Route Integration Test Suite', () => {
         });
 
         it('should reject token with token_version mismatch against DB', async () => {
-            const oldToken = jwt.sign(
+            const oldToken = signAccessToken(
                 { id: 1, username: 'admin', role: 'admin', token_version: 1 },
-                process.env.JWT_SECRET,
                 { expiresIn: '15m' }
             );
 
@@ -403,9 +418,8 @@ describe('Real Production Route Integration Test Suite', () => {
         });
 
         it('should keep old token invalid after authentication cache clear / server restart simulation', async () => {
-            const oldToken = jwt.sign(
+            const oldToken = signAccessToken(
                 { id: 1, username: 'admin', role: 'admin', token_version: 1 },
-                process.env.JWT_SECRET,
                 { expiresIn: '15m' }
             );
 
@@ -423,9 +437,8 @@ describe('Real Production Route Integration Test Suite', () => {
         });
 
         it('should reject access token for deleted user even if JWT is valid', async () => {
-            const userToken = jwt.sign(
+            const userToken = signAccessToken(
                 { id: 1, username: 'admin', role: 'admin', token_version: 1 },
-                process.env.JWT_SECRET,
                 { expiresIn: '15m' }
             );
 
@@ -440,9 +453,8 @@ describe('Real Production Route Integration Test Suite', () => {
         });
 
         it('should reject token when user role has been changed in DB', async () => {
-            const adminToken = jwt.sign(
+            const adminToken = signAccessToken(
                 { id: 1, username: 'admin', role: 'admin', token_version: 1 },
-                process.env.JWT_SECRET,
                 { expiresIn: '15m' }
             );
 
@@ -457,9 +469,8 @@ describe('Real Production Route Integration Test Suite', () => {
         });
 
         it('Socket.IO auth shared validation rejects old token version', async () => {
-            const oldToken = jwt.sign(
+            const oldToken = signAccessToken(
                 { id: 1, username: 'admin', role: 'admin', token_version: 1 },
-                process.env.JWT_SECRET,
                 { expiresIn: '15m' }
             );
 
@@ -479,11 +490,11 @@ describe('Real Production Route Integration Test Suite', () => {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'X-Agent-Key': process.env.AGENT_API_KEY
+                    'X-Agent-Key': 'agk_devA.secret-device-a-12345'
                 },
                 body: JSON.stringify({
                     hostname: 'host-1',
-                    ip_address: '10.0.80.10',
+                    ip_address: '10.0.80.50',
                     os_name: oversizedOs
                 })
             });
@@ -614,7 +625,7 @@ describe('Real Production Route Integration Test Suite', () => {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'X-Agent-Key': process.env.AGENT_API_KEY
+                    'X-Agent-Key': 'agk_devA.secret-device-a-12345'
                 },
                 body: JSON.stringify({
                     device_ip: '10.0.80.50',
@@ -630,9 +641,8 @@ describe('Real Production Route Integration Test Suite', () => {
 
     describe('6. Printer Scan Conflict', () => {
         it('returns 409 Conflict when printer scan is already running', async () => {
-            const adminToken = jwt.sign(
+            const adminToken = signAccessToken(
                 { id: 1, username: 'admin', role: 'admin', token_version: 1 },
-                process.env.JWT_SECRET,
                 { expiresIn: '15m' }
             );
 
@@ -687,9 +697,8 @@ describe('Real Production Route Integration Test Suite', () => {
         });
 
         it('/suggest accepts real /23 CIDR and returns host in second block when first block full', async () => {
-            const adminToken = jwt.sign(
+            const adminToken = signAccessToken(
                 { id: 1, username: 'admin', role: 'admin', token_version: 1 },
-                process.env.JWT_SECRET,
                 { expiresIn: '15m' }
             );
 
@@ -710,9 +719,8 @@ describe('Real Production Route Integration Test Suite', () => {
         });
 
         it('/suggest returns 400 for invalid CIDR and IPv6', async () => {
-            const adminToken = jwt.sign(
+            const adminToken = signAccessToken(
                 { id: 1, username: 'admin', role: 'admin', token_version: 1 },
-                process.env.JWT_SECRET,
                 { expiresIn: '15m' }
             );
 

@@ -1,7 +1,19 @@
 const express = require('express');
 const router = express.Router();
+const rateLimit = require('express-rate-limit');
 const { pool } = require('../db/connection');
 const { authenticateToken } = require('../middleware/auth');
+
+const analyticsLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 500,
+    standardHeaders: true,
+    legacyHeaders: false,
+    skip: () => process.env.NODE_ENV === 'test',
+    message: { error: 'Çok fazla istek yapıldı, lütfen daha sonra tekrar deneyiniz.' }
+});
+
+router.use(analyticsLimiter);
 
 // GET /api/analytics/summary — Grafikler için analitik özet
 router.get('/summary', authenticateToken, async (req, res) => {
@@ -140,7 +152,7 @@ router.get('/summary', authenticateToken, async (req, res) => {
 
         // 8. Toner Öngörü Analizi (Tüketim hızları ve tahmini bitiş)
         const printerTonerForecastRes = await pool.query(`
-            SELECT p.id, p.name as printer_name, p.department, p.toner_model,
+            SELECT p.id, p.name as printer_name, p.ip_address, p.department, p.toner_model,
                    t.color, t.level, t.max_capacity
             FROM printers p
             INNER JOIN printer_toners t ON t.printer_id = p.id
@@ -205,10 +217,13 @@ router.get('/summary', authenticateToken, async (req, res) => {
             return {
                 id: row.id,
                 printerName: row.printer_name,
+                ip: row.ip_address || '',
                 department: row.department || 'Genel',
                 tonerModel: row.toner_model,
                 color: row.color,
+                currentPercentage: Math.round(currentPercentage * 100),
                 levelPercentage: Math.round(currentPercentage * 100),
+                avgDailyPrint: Math.max(1, Math.round((monthlyConsumptionRate * 2500) / 30)),
                 monthlyConsumptionRate: parseFloat(monthlyConsumptionRate.toFixed(2)),
                 stockQuantity: stockQty,
                 estimatedRemainingDays: totalEstimatedRemainingDays
