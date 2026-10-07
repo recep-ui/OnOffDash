@@ -1,7 +1,6 @@
 const snmp = require('net-snmp');
 const axios = require('axios');
 const cheerio = require('cheerio');
-const https = require('https');
 const { pool } = require('../db/connection');
 const { getLowTonerThreshold } = require('../utils/tonerConfig');
 
@@ -560,10 +559,8 @@ class PrinterMonitorService {
             pageCount: 0
         };
 
-        const httpsAgent = new https.Agent({ rejectUnauthorized: false });
         const axiosInstance = axios.create({
             timeout: 5000,
-            httpsAgent,
             maxRedirects: 5,
             headers: {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) OnOffDash-PrinterMonitor/2.0'
@@ -577,9 +574,7 @@ class PrinterMonitorService {
             `http://${ipAddress}/general/status.html`,
             `http://${ipAddress}/startwlm/HServer?searchJob=INFO`,
             `http://${ipAddress}/status.html`,
-            `http://${ipAddress}/home.htm`,
-            `https://${ipAddress}/info_suppliesStatus.html`,
-            `https://${ipAddress}/`
+            `http://${ipAddress}/home.htm`
         ];
 
         let html = '';
