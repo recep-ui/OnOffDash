@@ -738,4 +738,27 @@ router.post('/scan', requireRole('operator'), async (req, res) => {
     }
 });
 
+// POST /api/printers/:id/scan — Belirli bir yazıcıyı SNMP/Web ile hemen tara ve güncel sonucunu dön
+router.post('/:id/scan', requireRole('operator'), async (req, res) => {
+    try {
+        let monitor = req.app.get('printerMonitorService');
+        if (!monitor) {
+            const io = req.app.get('io');
+            const PrinterMonitorService = require('../services/printerMonitorService');
+            monitor = new PrinterMonitorService(io);
+            req.app.set('printerMonitorService', monitor);
+        }
+
+        const updated = await monitor.scanSinglePrinter(req.params.id);
+        if (!updated) {
+            return res.status(404).json({ error: 'Yazıcı bulunamadı veya taranamadı.' });
+        }
+
+        res.json({ message: 'Yazıcı başarıyla tarandı.', printer: sanitizePrinter(updated) });
+    } catch (err) {
+        console.error('Error scanning single printer:', err);
+        res.status(500).json({ error: 'Yazıcı taraması başarısız: ' + err.message });
+    }
+});
+
 module.exports = router;

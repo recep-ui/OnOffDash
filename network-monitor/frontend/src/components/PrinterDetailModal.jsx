@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Printer, Activity, Wrench, AlertTriangle, CheckCircle2, FileText, Edit2 } from 'lucide-react';
+import { Printer, Activity, Wrench, AlertTriangle, CheckCircle2, FileText, Edit2, RefreshCw } from 'lucide-react';
 import StatusBadge from './StatusBadge';
 import Modal from './ui/Modal';
 import Button from './ui/Button';
@@ -21,6 +21,8 @@ function getRelativeTime(dateStr) {
 export default function PrinterDetailModal({ printer, onClose, onEdit, role }) {
   const [details, setDetails] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [scanStatus, setScanStatus] = useState(null);
 
   useEffect(() => {
     if (!printer?.id) return;
@@ -40,6 +42,26 @@ export default function PrinterDetailModal({ printer, onClose, onEdit, role }) {
       });
   }, [printer?.id]);
 
+  const handleScan = async () => {
+    if (!printer?.id || refreshing) return;
+    setRefreshing(true);
+    setScanStatus(null);
+    try {
+      const res = await fetchWithAuth(`/api/printers/${printer.id}/scan`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Tarama başlatılamadı');
+      if (data.printer) {
+        setDetails(data.printer);
+        setScanStatus({ type: 'success', text: 'Toner seviyeleri ve durum güncellendi.' });
+      }
+    } catch (err) {
+      console.error('Scan error:', err);
+      setScanStatus({ type: 'error', text: err.message || 'Tarama başarısız.' });
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
   if (!printer) return null;
 
   const p = details || printer;
@@ -54,6 +76,17 @@ export default function PrinterDetailModal({ printer, onClose, onEdit, role }) {
       maxWidth="720px"
       footer={
         <>
+          {role !== 'viewer' && (
+            <Button
+              variant="secondary"
+              icon={RefreshCw}
+              disabled={refreshing}
+              onClick={handleScan}
+              style={{ marginRight: onEdit ? '8px' : 'auto' }}
+            >
+              {refreshing ? 'Taranıyor...' : 'Toner / Durum Tara'}
+            </Button>
+          )}
           {onEdit && role !== 'viewer' && (
             <Button
               variant="secondary"
@@ -70,6 +103,20 @@ export default function PrinterDetailModal({ printer, onClose, onEdit, role }) {
         </>
       }
     >
+      {scanStatus && (
+        <div style={{
+          padding: '8px 12px',
+          marginBottom: '12px',
+          borderRadius: 'var(--radius-sm)',
+          fontSize: '12.5px',
+          fontWeight: 500,
+          backgroundColor: scanStatus.type === 'success' ? 'var(--status-online-bg)' : 'var(--status-offline-bg)',
+          color: scanStatus.type === 'success' ? 'var(--status-online-text)' : 'var(--status-offline-text)',
+          border: `1px solid ${scanStatus.type === 'success' ? 'var(--status-online-border)' : 'var(--status-offline-border)'}`
+        }}>
+          {scanStatus.text}
+        </div>
+      )}
       {loading ? (
         <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>
           Veriler yükleniyor...
