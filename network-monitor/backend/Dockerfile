@@ -1,10 +1,12 @@
-FROM node:20.18-alpine
+FROM node:22-bookworm-slim
 
 WORKDIR /usr/src/app
 
 COPY package*.json ./
-RUN apk add --no-cache iputils libcap \
-    && setcap cap_net_raw+ep $(which ping || echo /bin/ping)
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends iputils-ping libcap2-bin wget \
+    && setcap cap_net_raw+ep "$(command -v ping)" \
+    && rm -rf /var/lib/apt/lists/*
 RUN npm ci --omit=dev
 
 COPY . .

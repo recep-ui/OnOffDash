@@ -155,7 +155,7 @@ class PrinterMonitorService {
                 `UPDATE printers SET
                     is_online = $1,
                     model = CASE WHEN $2 != '' THEN $2 ELSE model END,
-                    status_text = $3,
+                    printer_status = $3,
                     has_paper_jam = $4,
                     total_page_count = CASE WHEN $5 > 0 THEN $5 ELSE total_page_count END,
                     error_message = $6,

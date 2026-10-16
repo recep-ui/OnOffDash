@@ -176,6 +176,14 @@ python3 -m unittest discover -s tests -p "test_*.py"
 ./network-monitor/scripts/test_clean_docker_install.sh --check-prereqs
 ```
 
+HP toner okumasını şeması hazırlanmış gerçek bir SQL Server test veritabanıyla doğrulamak için, çalışan Docker kurulumunda:
+
+```bash
+docker compose exec -e RUN_MSSQL_PRINTER_TESTS=1 backend node --test tests/printerMonitorService.mssql.test.js
+```
+
+Bu test yerel bir HP XML yanıtını okur; dört toner rengini, `%0` seviyesini, yazıcı durumunu ve uyarı olayını denetler. Oluşturduğu geçici yazıcıyı temizler. Normal `npm test` çalıştırmasında veritabanı testi atlanır.
+
 ---
 
 ## 📄 Lisans ve Destek
