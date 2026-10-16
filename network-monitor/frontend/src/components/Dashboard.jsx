@@ -25,7 +25,7 @@ import { useAuth } from '../context/AuthContext';
 
 export default function Dashboard() {
   const { token, user, login: handleLogin, logout: handleLogout, loading } = useAuth();
-  const { connected, on, off, socket } = useSocket(token);
+  const { connected, on, off, socket } = useSocket(user?.must_change_password ? null : token);
 
   if (loading) {
     return (
@@ -107,10 +107,10 @@ function DashboardContent({ connected, on, off, socket, token, user, onLogin, on
   }, []);
 
   useEffect(() => {
-    if (token) {
+    if (token && !user?.must_change_password) {
       loadData();
     }
-  }, [loadData, token]);
+  }, [loadData, token, user?.must_change_password]);
 
   // Socket event listeners
   useEffect(() => {

@@ -64,11 +64,12 @@ export function useSocket(tokenParam) {
     });
 
     socketInstance.on('connect_error', async (err) => {
+      const requiresPasswordChange = Boolean(err?.message?.includes('password change required'));
       const isAuthError = err && err.message && (
         err.message.includes('Authentication error') ||
         err.message.includes('token required') ||
         err.message.includes('invalid or expired') ||
-        err.message.includes('password change required')
+        requiresPasswordChange
       );
 
       if (isAuthError) {
@@ -81,6 +82,9 @@ export function useSocket(tokenParam) {
           setSocket(null);
           setConnected(false);
         }
+
+        // Keep the valid session available for the mandatory password-change form.
+        if (requiresPasswordChange) return;
 
         // 2. Invoke token refresh mechanism using HttpOnly cookie
         try {

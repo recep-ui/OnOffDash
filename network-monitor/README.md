@@ -71,6 +71,14 @@ OnOffDash V2, kurumsal yerel ağlardaki bilgisayarları, sunucuları, yazıcıla
 
 Durdurmak için: `docker compose down`
 
+### Giriş sorunlarını giderme
+
+- İlk girişte yönetici parolasını değiştirme formu açılır. Parola değiştirilene kadar canlı bağlantı ve panel sorguları başlatılmaz; oturum korunur.
+- Uygulamanın ilk yönetici hesabı `.env` içindeki `BOOTSTRAP_ADMIN_USERNAME` ve `BOOTSTRAP_ADMIN_PASSWORD` ile oluşturulur. `DB_USER` ve `MSSQL_SA_PASSWORD` veritabanı içindir.
+- Bootstrap bilgileri yalnızca kullanıcı tablosu boşken kullanılır. Mevcut bir kurulumda `.env` içindeki bootstrap parolasını değiştirmek, kayıtlı hesabın parolasını güncellemez.
+- Uygulamayı açtığınız adres `CORS_ORIGINS` içinde bulunmalıdır. Örneğin `http://localhost:8080` üzerinden giriş yapıyorsanız bu adresi ekleyin; sunucunun IP adresinden açıyorsanız o adresi ve portu da ekleyin. Adreste yol veya son `/` kullanmayın.
+- Ortam ayarlarını değiştirdikten sonra `docker compose up -d --force-recreate backend frontend` çalıştırın. İzin verilmeyen bir adres için giriş API'si `403` ve `CORS_ORIGIN_BLOCKED` açıklamasını döndürür.
+
 ---
 
 ## 🛠️ Manuel Kurulum (Geliştiriciler İçin)

@@ -61,7 +61,9 @@ const corsOptions = {
         if (allowedOrigins.includes(origin)) {
             return callback(null, true);
         }
-        return callback(new Error(`CORS blocked for origin: ${origin}`));
+        const error = new Error(`Bu adresten girişe izin verilmiyor. CORS_ORIGINS ayarına ${origin} adresini ekleyin.`);
+        error.code = 'CORS_ORIGIN_BLOCKED';
+        return callback(error);
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
@@ -124,6 +126,12 @@ app.use(helmet({
     crossOriginEmbedderPolicy: false
 }));
 app.use(cors(corsOptions));
+app.use((err, req, res, next) => {
+    if (err.code === 'CORS_ORIGIN_BLOCKED') {
+        return res.status(403).json({ error: err.message, code: err.code });
+    }
+    return next(err);
+});
 app.use(express.json({ limit: '5mb' })); // Yazılım envanteri büyük olabilir
 
 // Socket.IO instance'ını Express app'e bağla

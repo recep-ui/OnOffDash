@@ -351,6 +351,46 @@ describe('Real Production Route Integration Test Suite', () => {
         });
     });
 
+    describe('CORS login diagnostics', () => {
+        it('returns an actionable JSON error for login from an unconfigured origin', async () => {
+            const origin = 'https://unconfigured-login.example';
+            const res = await fetch(`${baseUrl}/api/auth/login`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Origin: origin },
+                body: '{}'
+            });
+            assert.equal(res.status, 403);
+            assert.match(res.headers.get('content-type'), /application\/json/);
+            assert.equal(res.headers.get('access-control-allow-origin'), null);
+            const data = await res.json();
+            assert.equal(data.code, 'CORS_ORIGIN_BLOCKED');
+            assert.ok(data.error.includes('CORS_ORIGINS'));
+            assert.ok(data.error.includes(origin));
+        });
+
+        it('rejects an unconfigured preflight without allowing that origin', async () => {
+            const res = await fetch(`${baseUrl}/api/auth/login`, {
+                method: 'OPTIONS',
+                headers: { Origin: 'https://unconfigured-login.example', 'Access-Control-Request-Method': 'POST' }
+            });
+            assert.equal(res.status, 403);
+            assert.equal(res.headers.get('access-control-allow-origin'), null);
+            assert.equal((await res.json()).code, 'CORS_ORIGIN_BLOCKED');
+        });
+
+        it('continues to allow configured origins and validates login credentials normally', async () => {
+            const origin = (process.env.CORS_ORIGINS || process.env.CORS_ORIGIN || 'http://localhost:5173').split(',')[0].trim();
+            const res = await fetch(`${baseUrl}/api/auth/login`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Origin: origin },
+                body: '{}'
+            });
+            assert.equal(res.status, 400);
+            assert.equal(res.headers.get('access-control-allow-origin'), origin);
+            assert.equal((await res.json()).error, 'Kullanıcı adı ve şifre gereklidir.');
+        });
+    });
+
     describe('2. Authentication & Persistent JWT Revocation', () => {
         it('should login and return short-lived access token and set HttpOnly refresh cookie', async () => {
             const res = await fetch(`${baseUrl}/api/auth/login`, {

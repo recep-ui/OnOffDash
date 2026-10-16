@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { useSocket } from '../src/hooks/useSocket';
 import { io } from 'socket.io-client';
+import { getAccessToken, setAccessToken } from '../src/services/api';
 
 vi.mock('socket.io-client', () => {
   return {
@@ -26,6 +27,7 @@ describe('useSocket Hook', () => {
     };
 
     io.mockReturnValue(mockSocketInstance);
+    setAccessToken(null);
   });
 
   it('should not initiate connection when token is null or missing', () => {
@@ -66,5 +68,25 @@ describe('useSocket Hook', () => {
     });
 
     expect(mockSocketInstance.disconnect).toHaveBeenCalled();
+  });
+
+  it('preserves the authenticated session when the server requires a password change', async () => {
+    const logoutSpy = vi.fn();
+    window.addEventListener('auth:logout', logoutSpy);
+    globalThis.fetch = vi.fn().mockResolvedValue({ ok: false, status: 401 });
+    setAccessToken('bootstrap-token');
+    const { unmount } = renderHook(() => useSocket('bootstrap-token'));
+    try {
+      await act(async () => {
+        await eventCallbacks.connect_error(new Error('Authentication error: password change required'));
+      });
+      expect(mockSocketInstance.disconnect).toHaveBeenCalled();
+      expect(globalThis.fetch).not.toHaveBeenCalled();
+      expect(getAccessToken()).toBe('bootstrap-token');
+      expect(logoutSpy).not.toHaveBeenCalled();
+    } finally {
+      unmount();
+      window.removeEventListener('auth:logout', logoutSpy);
+    }
   });
 });
