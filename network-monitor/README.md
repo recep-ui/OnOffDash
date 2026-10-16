@@ -76,6 +76,8 @@ Durdurmak için: `docker compose down`
 - İlk girişte yönetici parolasını değiştirme formu açılır. Parola değiştirilene kadar canlı bağlantı ve panel sorguları başlatılmaz; oturum korunur.
 - Uygulamanın ilk yönetici hesabı `.env` içindeki `BOOTSTRAP_ADMIN_USERNAME` ve `BOOTSTRAP_ADMIN_PASSWORD` ile oluşturulur. `DB_USER` ve `MSSQL_SA_PASSWORD` veritabanı içindir.
 - Bootstrap bilgileri yalnızca kullanıcı tablosu boşken kullanılır. Mevcut bir kurulumda `.env` içindeki bootstrap parolasını değiştirmek, kayıtlı hesabın parolasını güncellemez.
+- Sayfayı yenileyince giriş ekranına dönüyorsanız oturum çerezinin bağlantı türüne uygun olması gerekir. Standart Docker kurulumu HTTP sunar ve `COOKIE_SECURE=false` kullanır; IP adresiyle erişim de buna dahildir. HTTPS sunan harici bir ters vekil kullanıyorsanız `.env` içinde `COOKIE_SECURE=true` ayarlayın. `docker-compose.prod.yml` ile HTTPS kurulumunda bu değer otomatik olarak `true` olur.
+- Bu düzeltmeyi almak için `git pull --ff-only` ardından `docker compose up -d --build` çalıştırın. Güncellemeden sonra yeniden giriş yapın; yeni oturum çerezi sayfa yenilemelerinde oturumu geri yükler.
 - Uygulamayı açtığınız adres `CORS_ORIGINS` içinde bulunmalıdır. Örneğin `http://localhost:8080` üzerinden giriş yapıyorsanız bu adresi ekleyin; sunucunun IP adresinden açıyorsanız o adresi ve portu da ekleyin. Adreste yol veya son `/` kullanmayın.
 - Ortam ayarlarını değiştirdikten sonra `docker compose up -d --force-recreate backend frontend` çalıştırın. İzin verilmeyen bir adres için giriş API'si `403` ve `CORS_ORIGIN_BLOCKED` açıklamasını döndürür.
 

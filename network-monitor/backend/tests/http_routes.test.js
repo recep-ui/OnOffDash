@@ -411,6 +411,61 @@ describe('Real Production Route Integration Test Suite', () => {
             assert.ok(cookieHeader.includes('refreshToken='), 'Cookie must contain refreshToken');
         });
 
+        it('restores an HTTP session on repeated page reloads and revokes it on logout', async (t) => {
+            const savedEnv = { NODE_ENV: process.env.NODE_ENV, COOKIE_SECURE: process.env.COOKIE_SECURE };
+            t.after(() => {
+                for (const [key, value] of Object.entries(savedEnv)) {
+                    if (value === undefined) delete process.env[key];
+                    else process.env[key] = value;
+                }
+            });
+            process.env.NODE_ENV = 'production';
+            process.env.COOKIE_SECURE = 'false';
+
+            const login = await fetch(`${baseUrl}/api/auth/login`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username: 'admin', password: 'AdminPass123!' })
+            });
+            assert.equal(login.status, 200);
+            let cookie = login.headers.get('set-cookie');
+
+            for (let reload = 0; reload < 3; reload++) {
+                assert.ok(!cookie.split('; ').includes('Secure'), 'HTTP clients must be able to send this cookie');
+                const previousCookie = cookie.split(';')[0];
+                // A page reload loses the access token; only the browser cookie remains.
+                const refresh = await fetch(`${baseUrl}/api/auth/refresh`, {
+                    method: 'POST',
+                    headers: { Cookie: previousCookie }
+                });
+                assert.equal(refresh.status, 200);
+                const data = await refresh.json();
+                assert.equal(data.user.username, 'admin');
+                const me = await fetch(`${baseUrl}/api/auth/me`, {
+                    headers: { Authorization: `Bearer ${data.token}` }
+                });
+                assert.equal(me.status, 200);
+                cookie = refresh.headers.get('set-cookie');
+                assert.notEqual(cookie.split(';')[0], previousCookie);
+
+                const staleRefresh = await fetch(`${baseUrl}/api/auth/refresh`, {
+                    method: 'POST', headers: { Cookie: previousCookie }
+                });
+                assert.equal(staleRefresh.status, 401, 'Rotated refresh tokens must be revoked');
+            }
+
+            const logout = await fetch(`${baseUrl}/api/auth/logout`, {
+                method: 'POST', headers: { Cookie: cookie.split(';')[0] }
+            });
+            assert.equal(logout.status, 200);
+            assert.ok(logout.headers.get('set-cookie').includes('Max-Age=0'));
+            assert.ok(!logout.headers.get('set-cookie').split('; ').includes('Secure'));
+            const afterLogout = await fetch(`${baseUrl}/api/auth/refresh`, {
+                method: 'POST', headers: { Cookie: cookie.split(';')[0] }
+            });
+            assert.equal(afterLogout.status, 401);
+        });
+
         it('should reject expired JWT access token', async () => {
             const expiredToken = jwt.sign(
                 { id: 1, username: 'admin', role: 'admin', token_version: 1 },

@@ -24,8 +24,16 @@ function parseCookies(req) {
     return list;
 }
 
+function useSecureCookie() {
+    const setting = process.env.COOKIE_SECURE?.trim().toLowerCase();
+    if (setting === 'true' || setting === 'false') {
+        return setting === 'true';
+    }
+    // Keep the secure production default outside the explicitly configured HTTP stack.
+    return process.env.NODE_ENV === 'production';
+}
+
 function setRefreshTokenCookie(res, refreshToken, maxAgeSeconds = 7 * 24 * 60 * 60) {
-    const isProd = process.env.NODE_ENV === 'production' || process.env.COOKIE_SECURE === 'true';
     const cookieParts = [
         `refreshToken=${encodeURIComponent(refreshToken)}`,
         'Path=/api/auth',
@@ -34,7 +42,7 @@ function setRefreshTokenCookie(res, refreshToken, maxAgeSeconds = 7 * 24 * 60 * 
         `Max-Age=${maxAgeSeconds}`
     ];
 
-    if (isProd) {
+    if (useSecureCookie()) {
         cookieParts.push('Secure');
     }
 
@@ -42,7 +50,6 @@ function setRefreshTokenCookie(res, refreshToken, maxAgeSeconds = 7 * 24 * 60 * 
 }
 
 function clearRefreshTokenCookie(res) {
-    const isProd = process.env.NODE_ENV === 'production' || process.env.COOKIE_SECURE === 'true';
     const cookieParts = [
         'refreshToken=',
         'Path=/api/auth',
@@ -51,7 +58,7 @@ function clearRefreshTokenCookie(res) {
         'Max-Age=0'
     ];
 
-    if (isProd) {
+    if (useSecureCookie()) {
         cookieParts.push('Secure');
     }
 

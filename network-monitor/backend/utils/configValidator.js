@@ -7,6 +7,11 @@ function validateConfig(options = { exitOnError: true }) {
     const isProd = process.env.NODE_ENV === 'production';
     const errors = [];
 
+    const cookieSecure = process.env.COOKIE_SECURE?.trim().toLowerCase();
+    if (cookieSecure && cookieSecure !== 'true' && cookieSecure !== 'false') {
+        errors.push('COOKIE_SECURE must be true or false.');
+    }
+
     const jwtSecret = process.env.JWT_SECRET;
     if (!jwtSecret || typeof jwtSecret !== 'string') {
         errors.push('JWT_SECRET is missing or empty.');

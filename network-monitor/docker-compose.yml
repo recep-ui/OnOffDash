@@ -50,6 +50,8 @@ services:
         condition: service_completed_successfully
     environment:
       - NODE_ENV=production
+      # This stack serves HTTP. The HTTPS override enforces Secure cookies.
+      - COOKIE_SECURE=${COOKIE_SECURE:-false}
       - DB_HOST=db
       - DB_PORT=1433
       - DB_NAME=${DB_NAME:-network_monitor}

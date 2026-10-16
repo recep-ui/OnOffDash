@@ -5,6 +5,7 @@ services:
   backend:
     environment:
       - NODE_ENV=production
+      - COOKIE_SECURE=true
       - CORS_ORIGINS=${CORS_ORIGINS}
       - SNMP_COMMUNITY=${SNMP_COMMUNITY}
       - LOW_TONER_THRESHOLD_PERCENT=${LOW_TONER_THRESHOLD_PERCENT:-10}
